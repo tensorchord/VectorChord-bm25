@@ -107,21 +107,21 @@ pub unsafe extern "C" fn amvacuumcleanup(
 
     let sealed_reader = SealedSegmentReader::new(index, meta.sealed_segment);
     for i in 0..meta.sealed_segment.term_id_cnt {
-        let Some(mut posting) = sealed_reader.get_postings_docid_only(i) else {
+        let Some(mut posting) = sealed_reader.get_postings(i) else {
             continue;
         };
         loop {
             posting.decode_block();
             loop {
-                let doc_id = posting.doc_id();
+                let doc_id = posting.docid();
                 if !delete_bitmap_reader.is_delete(doc_id) {
                     term_stats[i as usize] += 1;
                 }
-                if !posting.advance_cur() {
+                if !posting.next_doc() {
                     break;
                 }
             }
-            if !posting.advance_block() {
+            if !posting.next_block() {
                 break;
             }
         }
