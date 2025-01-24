@@ -13,7 +13,7 @@ SELECT tokenize('PostgreSQL', 'Tocken');
 
 statement ok
 SELECT create_tokenizer('test_bert', $$
-tokenizer = "Bert"
+tokenizer = "bert"
 $$);
 
 query I

@@ -1,6 +1,6 @@
 CREATE TABLE bm25_catalog.tokenizers (
     name TEXT NOT NULL UNIQUE PRIMARY KEY,
-    config TEXT NOT NULL
+    config BYTEA NOT NULL
 );
 
 CREATE FUNCTION unicode_tokenizer_insert_trigger()
@@ -10,8 +10,12 @@ DECLARE
     target_column TEXT := TG_ARGV[1];
 BEGIN
     EXECUTE format('
-    WITH new_tokens AS (
-        SELECT unnest(unicode_tokenizer_split($1.%I)) AS token
+    WITH 
+    config AS (
+        SELECT config FROM bm25_catalog.tokenizers WHERE name = %L
+    ),
+    new_tokens AS (
+        SELECT unnest(unicode_tokenizer_split($1.%I, config)) AS token FROM config
     ),
     to_insert AS (
         SELECT token FROM new_tokens
@@ -19,7 +23,7 @@ BEGIN
             SELECT 1 FROM bm25_catalog.%I WHERE token = new_tokens.token
         )
     )
-    INSERT INTO bm25_catalog.%I (token) SELECT token FROM to_insert ON CONFLICT (token) DO NOTHING', target_column, tokenizer_name, tokenizer_name) USING NEW;
+    INSERT INTO bm25_catalog.%I (token) SELECT token FROM to_insert ON CONFLICT (token) DO NOTHING', tokenizer_name, target_column, tokenizer_name, tokenizer_name) USING NEW;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -28,7 +32,7 @@ CREATE FUNCTION create_unicode_tokenizer_and_trigger(tokenizer_name TEXT, table_
 RETURNS VOID AS $body$
 BEGIN
     EXECUTE format('SELECT create_tokenizer(%L, $$
-        tokenizer = ''Unicode''
+        tokenizer = ''unicode''
         table = %L
         column = %L
         $$)', tokenizer_name, table_name, source_column);

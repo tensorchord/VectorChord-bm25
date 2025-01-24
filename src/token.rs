@@ -18,16 +18,21 @@ const TOKEN_PATTERN: &str = r"(?u)\b\w\w+\b";
 
 lazy_static::lazy_static! {
     static ref TOKEN_PATTERN_RE: regex::Regex = regex::Regex::new(TOKEN_PATTERN).unwrap();
-    pub static ref STOP_WORDS_LUCENE: HashSet<String> = {
+    static ref STOP_WORDS_LUCENE: HashSet<String> = {
         [
             "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is",
             "it", "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there",
             "these", "they", "this", "to", "was", "will", "with",
         ].iter().map(|s| s.to_string()).collect()
     };
-    pub static ref STOP_WORDS_NLTK: HashSet<String> = {
+    static ref STOP_WORDS_NLTK: HashSet<String> = {
         let words = stop_words::get(stop_words::LANGUAGE::English);
         words.into_iter().collect()
+    };
+    static ref STOP_WORDS_LUCENE_PLUS_NLTK: HashSet<String> = {
+        let mut words = STOP_WORDS_LUCENE.clone();
+        words.extend(STOP_WORDS_NLTK.iter().cloned());
+        words
     };
 
     static ref BERT_TOKENIZER: BertWithStemmerAndSplit = BertWithStemmerAndSplit::new();
@@ -73,7 +78,12 @@ impl Tocken {
 }
 
 #[pgrx::pg_extern(immutable, strict, parallel_safe)]
-pub fn unicode_tokenizer_split(text: &str) -> Vec<String> {
+pub fn unicode_tokenizer_split(text: &str, config: &[u8]) -> Vec<String> {
+    let config: TokenizerConfig = bincode::deserialize(config).unwrap_or_report();
+    unicode_tokenizer_split_inner(text, &config)
+}
+
+fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<String> {
     let mut tokens = Vec::new();
     for word in text.unicode_words() {
         // trim `'s` for English
@@ -89,10 +99,12 @@ pub fn unicode_tokenizer_split(text: &str) -> Vec<String> {
         if token.is_empty() {
             continue;
         }
-        if !STOP_WORDS_LUCENE.contains(&lowercase) {
-            tokens.push(token.clone());
-        }
-        if !STOP_WORDS_NLTK.contains(&lowercase) {
+        let stopwords = match config.stopwords {
+            StopWordsKind::Lucene => &*STOP_WORDS_LUCENE,
+            StopWordsKind::Nltk => &*STOP_WORDS_NLTK,
+            StopWordsKind::LucenePlusNltk => &*STOP_WORDS_LUCENE_PLUS_NLTK,
+        };
+        if !stopwords.contains(&token) {
             tokens.push(token);
         }
     }
@@ -100,11 +112,19 @@ pub fn unicode_tokenizer_split(text: &str) -> Vec<String> {
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
-#[repr(i32)]
+#[serde(rename_all = "snake_case")]
 enum TokenizerKind {
     Bert,
     Tocken,
     Unicode,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StopWordsKind {
+    Lucene,
+    Nltk,
+    LucenePlusNltk,
 }
 
 #[derive(Clone, Serialize, Deserialize, Validate)]
@@ -112,6 +132,8 @@ enum TokenizerKind {
 #[serde(deny_unknown_fields)]
 struct TokenizerConfig {
     tokenizer: TokenizerKind,
+    #[serde(default = "TokenizerConfig::default_stopwords")]
+    stopwords: StopWordsKind,
     #[serde(default)]
     table: Option<String>,
     #[serde(default)]
@@ -119,6 +141,10 @@ struct TokenizerConfig {
 }
 
 impl TokenizerConfig {
+    fn default_stopwords() -> StopWordsKind {
+        StopWordsKind::LucenePlusNltk
+    }
+
     fn validate_unicode(&self) -> Result<(), ValidationError> {
         if !matches!(self.tokenizer, TokenizerKind::Unicode) {
             return Ok(());
@@ -161,7 +187,10 @@ pub fn create_tokenizer(tokenizer_name: &str, config_str: &str) {
                 pgrx::PgBuiltInOids::TEXTOID.oid(),
                 tokenizer_name.into_datum(),
             ),
-            (pgrx::PgBuiltInOids::TEXTOID.oid(), config_str.into_datum()),
+            (
+                pgrx::PgBuiltInOids::BYTEAOID.oid(),
+                bincode::serialize(&config).unwrap().into_datum(),
+            ),
         ]);
         client.update(query, None, args).unwrap_or_report();
         if matches!(config.tokenizer, TokenizerKind::Unicode) {
@@ -187,13 +216,13 @@ fn drop_tokenizer(tokenizer_name: &str) {
             panic!("Tokenizer not found");
         }
 
-        let config: &str = rows
+        let config: &[u8] = rows
             .next()
             .unwrap()
             .get(1)
             .expect("no config value")
             .expect("no config value");
-        let config: TokenizerConfig = toml::from_str(config).unwrap_or_report();
+        let config: TokenizerConfig = bincode::deserialize(config).unwrap_or_report();
         if matches!(config.tokenizer, TokenizerKind::Unicode) {
             let table_name = format!("bm25_catalog.\"{}\"", tokenizer_name);
             let drop_table = format!("DROP TABLE IF EXISTS {}", table_name);
@@ -272,7 +301,7 @@ fn create_unicode_tokenizer_table(
     let mut tokens = HashSet::new();
     for row in rows {
         let text: &str = row.get(1).unwrap_or_report().expect("no text value");
-        let words = unicode_tokenizer_split(text);
+        let words = unicode_tokenizer_split_inner(text, config);
         tokens.extend(words);
     }
 
@@ -303,8 +332,13 @@ fn create_unicode_tokenizer_table(
     client.update(&trigger, None, None).unwrap_or_report();
 }
 
-fn unicode_tokenize(client: &SpiClient<'_>, text: &str, tokenizer_name: &str) -> Vec<u32> {
-    let tokens = unicode_tokenizer_split(text);
+fn unicode_tokenize(
+    client: &SpiClient<'_>,
+    text: &str,
+    tokenizer_name: &str,
+    config: &TokenizerConfig,
+) -> Vec<u32> {
+    let tokens = unicode_tokenizer_split_inner(text, config);
     let query = format!(
         "SELECT id, token FROM bm25_catalog.\"{}\" WHERE token = ANY($1)",
         tokenizer_name
@@ -351,17 +385,17 @@ fn custom_tokenize(text: &str, tokenizer_name: &str) -> Vec<u32> {
             panic!("Tokenizer not found");
         }
 
-        let config: &str = rows
+        let config: &[u8] = rows
             .next()
             .unwrap()
             .get(1)
             .expect("no config value")
             .expect("no config value");
-        let config: TokenizerConfig = toml::from_str(config).unwrap_or_report();
+        let config: TokenizerConfig = bincode::deserialize(config).unwrap_or_report();
         match config.tokenizer {
             TokenizerKind::Bert => BERT_TOKENIZER.encode(text),
             TokenizerKind::Tocken => TOCKENIZER.encode(text),
-            TokenizerKind::Unicode => unicode_tokenize(&client, text, tokenizer_name),
+            TokenizerKind::Unicode => unicode_tokenize(&client, text, tokenizer_name, &config),
         }
     })
 }

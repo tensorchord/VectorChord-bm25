@@ -40,7 +40,8 @@ SELECT id, text, embedding <&> to_bm25query('corpus_embedding_bm25', 'PostgreSQL
 CREATE TABLE corpus (id SERIAL, text TEXT, embedding bm25vector);
 INSERT INTO corpus (text) VALUES ('PostgreSQL is a powerful, open-source object-relational database system.'); -- insert text to the table
 SELECT create_tokenizer('test_token', $$
-tokenizer = 'Unicode'
+tokenizer = 'unicode'
+stopwords = 'lucene_plus_nltk'
 table = 'corpus'
 column = 'text'
 $$);
@@ -58,11 +59,12 @@ We utilize [`TOML`](https://toml.io/en/) to configure the tokenizer. You can spe
 
 Here is what each field means:
 
-| Field     | Type   | Description                                          |
-| --------- | ------ | ---------------------------------------------------- |
-| tokenizer | String | The tokenizer type (`Bert`, `Tocken`, or `Unicode`). |
-| table     | String | The table name to train on for Unicode tokenizer.    |
-| column    | String | The column name to train on for Unicode tokenizer.   |
+| Field     | Type   | Description                                                                                                        |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
+| tokenizer | String | The tokenizer type (`bert`, `tocken`, or `unicode`).                                                               |
+| stopwords | String | The stopwords used for Unicode tokenizer (`lucene`, `nltk`, or `lucene_plus_nltk`), default is `lucene_plus_nltk`. |
+| table     | String | The table name to train on for Unicode tokenizer.                                                                  |
+| column    | String | The column name to train on for Unicode tokenizer.                                                                 |
 
 ## Note
 

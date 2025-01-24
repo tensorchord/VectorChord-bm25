@@ -21,7 +21,7 @@ INSERT INTO documents (passage) VALUES
 
 statement ok
 SELECT create_tokenizer('documents_tokenizer', $$
-tokenizer = 'Unicode'
+tokenizer = 'unicode'
 table = 'documents'
 column = 'passage'
 $$);
