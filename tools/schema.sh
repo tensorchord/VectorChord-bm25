@@ -38,6 +38,6 @@ code=$(mktemp)
 chmod 700 $code
 CONTROL_FILEPATH="./vchord_bm25.control" SO_FILEPATH="$DIR/libvchord_bm25.so" $(dirname "$0")/schema-codegen.sh >> $code
 
-PGRX_EMBED=$code cargo rustc --package vchord_bm25 --bin pgrx_embed_vchord "$@" -- --cfg pgrx_embed
+PGRX_EMBED=$code cargo rustc --package vchord_bm25 --bin pgrx_embed_vchord_bm25 "$@" -- --cfg pgrx_embed
 
 CARGO_PKG_VERSION=${SEMVER} QEMU_LD_PREFIX=$QEMU_LD_PREFIX "${RUNNER[@]}" "$DIR/pgrx_embed_vchord_bm25" | expand -t 4 > $DIR/schema.sql
