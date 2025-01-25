@@ -110,7 +110,7 @@ jobs:
           push: true
           platforms: "linux/amd64"
           file: ./docker/binary.Dockerfile
-          tags: tensorchord/vchord_bm25-binary:pg${{ matrix.version }}-v${{ env.SEMVER }}
+          tags: silverha/vchord_bm25-binary:pg${{ matrix.version }}-v${{ env.SEMVER }}
           build-args: |
             PG_VERSION=${{ matrix.version }}
             SEMVER=${{ env.SEMVER }}
@@ -121,7 +121,7 @@ jobs:
           push: true
           platforms: "linux/amd64"
           file: ./docker/Dockerfile
-          tags: tensorchord/vchord_bm25-postgres:pg${{ matrix.version }}-v${{ env.SEMVER }}
+          tags: silverha/vchord_bm25-postgres:pg${{ matrix.version }}-v${{ env.SEMVER }}
           build-args: |
             PG_VERSION=${{ matrix.version }}
             SEMVER=${{ env.SEMVER }}
