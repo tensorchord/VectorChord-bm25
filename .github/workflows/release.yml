@@ -72,8 +72,8 @@ jobs:
           docker run --rm -v .:/workspace $CACHE_ENVS -e SEMVER=${SEMVER} $PGRX_IMAGE ./tools/schema.sh --features pg$VERSION --release
           ./tools/package.sh
           ls ./build
-          gh release upload --clobber $SEMVER ./build/vchord_bm25-pg${VERSION}_${SEMVER}_${PLATFORM}.deb
-          gh release upload --clobber $SEMVER ./build/vchord_bm25-pg${VERSION}_${ARCH}-unknown-linux-gnu_${SEMVER}.zip
+          gh release upload --clobber $SEMVER ./build/vchord-bm25-pg${VERSION}_${SEMVER}_${PLATFORM}.deb
+          gh release upload --clobber $SEMVER ./build/vchord-bm25-pg${VERSION}_${ARCH}-unknown-linux-gnu_${SEMVER}.zip
 
   docker:
     runs-on: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
         run: |
           mkdir -p build
           for arch in amd64; do
-            gh release download $SEMVER --pattern "vchord_bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb" --output ./build/vchord_bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb
+            gh release download $SEMVER --pattern "vchord-bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb" --output ./build/vchord-bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb
           done
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
