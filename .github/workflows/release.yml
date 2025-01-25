@@ -1,0 +1,128 @@
+name: Publish
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag name (semver without v-prefix)'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  semver:
+    runs-on: ubuntu-latest
+    outputs:
+      SEMVER: ${{ steps.semver.outputs.SEMVER }}
+    steps:
+      - uses: actions/github-script@v7
+        id: semver
+        with:
+          script: |
+            const tag = "${{ github.event.inputs.tag }}" || "${{ github.event.release.tag_name }}";
+            console.log(`Tag: ${tag}`);
+            const r = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+            if (!r.test(tag)) {
+              core.setFailed(`Action failed with an invalid semver.`);
+            }
+            core.setOutput('SEMVER', tag);
+
+  build:
+    runs-on: ${{ matrix.runner }}
+    needs: ["semver"]
+    strategy:
+      matrix:
+        version: ["14", "15", "16", "17"]
+        runner: ["ubicloud-standard-4", "ubicloud-standard-4-arm"]
+    env:
+      PGRX_IMAGE: "ghcr.io/tensorchord/vectorchord-pgrx:0.12.9-nightly-2024-12-25"
+      SEMVER: ${{ needs.semver.outputs.SEMVER }}
+      ARCH: ${{ matrix.runner == 'ubicloud-standard-4' && 'x86_64' || 'aarch64' }}
+      PLATFORM: ${{ matrix.runner == 'ubicloud-standard-4' && 'amd64' || 'arm64' }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure sccache
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = process.env.ACTIONS_CACHE_URL || '';
+            const token = process.env.ACTIONS_RUNTIME_TOKEN || '';
+            core.exportVariable(
+              'CACHE_ENVS',
+              `-e CARGO_INCREMENTAL=0 -e SCCACHE_GHA_ENABLED=true -e RUSTC_WRAPPER=sccache -e ACTIONS_CACHE_URL=${url} -e ACTIONS_RUNTIME_TOKEN=${token}`,
+            );
+      - name: Set up pgrx docker images and permissions
+        run: |
+          docker pull $PGRX_IMAGE
+          echo "Default user: $(id -u):$(id -g)"
+          sudo chmod -R 777 .
+
+      - name: Build
+        env:
+          VERSION: ${{ matrix.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm -v .:/workspace $CACHE_ENVS $PGRX_IMAGE cargo build --lib --features pg$VERSION --release
+          docker run --rm -v .:/workspace $CACHE_ENVS -e SEMVER=${SEMVER} $PGRX_IMAGE ./tools/schema.sh --features pg$VERSION --release
+          ./tools/package.sh
+          ls ./build
+          gh release upload --clobber $SEMVER ./build/vchord_bm25-pg${VERSION}_${SEMVER}_${PLATFORM}.deb
+          gh release upload --clobber $SEMVER ./build/vchord_bm25-pg${VERSION}_${ARCH}-unknown-linux-gnu_${SEMVER}.zip
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: ["semver", "build"]
+    strategy:
+      matrix:
+        version: ["14", "15", "16", "17"]
+    env:
+      SEMVER: ${{ needs.semver.outputs.SEMVER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build
+          for arch in amd64 arm64; do
+            gh release download $SEMVER --pattern "vchord_bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb" --output ./build/vchord_bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb
+          done
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERIO_USERNAME }}
+          password: ${{ secrets.DOCKERIO_TOKEN }}
+      - name: Push binary release to Docker Registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: "linux/amd64,linux/arm64"
+          file: ./docker/binary.Dockerfile
+          tags: tensorchord/vchord_bm25-binary:pg${{ matrix.version }}-v${{ env.SEMVER }}
+          build-args: |
+            PG_VERSION=${{ matrix.version }}
+            SEMVER=${{ env.SEMVER }}
+      - name: Push PostgreSQL release to Docker Registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: "linux/amd64,linux/arm64"
+          file: ./docker/Dockerfile
+          tags: tensorchord/vchord_bm25-postgres:pg${{ matrix.version }}-v${{ env.SEMVER }}
+          build-args: |
+            PG_VERSION=${{ matrix.version }}
+            SEMVER=${{ env.SEMVER }}
+            PGVECTOR=0.8.0
