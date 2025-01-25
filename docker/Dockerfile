@@ -8,7 +8,7 @@ ARG SEMVER=0.0.0
 ARG TARGETARCH
 
 RUN echo ${PG_VERSION}
-COPY ./build/vchord-pg${PG_VERSION}_${SEMVER}_${TARGETARCH}.deb /tmp/vchord.deb
-RUN apt-get install -y /tmp/vchord.deb && rm -f /tmp/vchord.deb
+COPY ./build/vchord-bm25-pg${PG_VERSION}_${SEMVER}_${TARGETARCH}.deb /tmp/vchord-bm25.deb
+RUN apt-get install -y /tmp/vchord-bm25.deb && rm -f /tmp/vchord-bm25.deb
 
-CMD ["postgres", "-c" ,"shared_preload_libraries=vchord.so"]
+CMD ["postgres", "-c" ,"shared_preload_libraries=vchord_bm25.so"]
