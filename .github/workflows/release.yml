@@ -77,6 +77,8 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     needs: ["semver", "build"]
     strategy:
       matrix:
@@ -103,6 +105,12 @@ jobs:
         with:
           username: ${{ secrets.DOCKERIO_USERNAME }}
           password: ${{ secrets.DOCKERIO_TOKEN }}
+      - name: Login to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push binary release to Docker Registry
         uses: docker/build-push-action@v6
         with:
@@ -110,7 +118,9 @@ jobs:
           push: true
           platforms: "linux/amd64,linux/arm64"
           file: ./docker/binary.Dockerfile
-          tags: tensorchord/vchord_bm25-binary:pg${{ matrix.version }}-v${{ env.SEMVER }}
+          tags: |
+            tensorchord/vchord_bm25-binary:pg${{ matrix.version }}-v${{ env.SEMVER }}
+            ghcr.io/tensorchord/vchord_bm25-binary:pg${{ matrix.version }}-v${{ env.SEMVER }}
           build-args: |
             PG_VERSION=${{ matrix.version }}
             SEMVER=${{ env.SEMVER }}
@@ -121,7 +131,9 @@ jobs:
           push: true
           platforms: "linux/amd64,linux/arm64"
           file: ./docker/Dockerfile
-          tags: tensorchord/vchord_bm25-postgres:pg${{ matrix.version }}-v${{ env.SEMVER }}
+          tags: |
+            tensorchord/vchord_bm25-postgres:pg${{ matrix.version }}-v${{ env.SEMVER }}
+            ghcr.io/tensorchord/vchord_bm25-postgres:pg${{ matrix.version }}-v${{ env.SEMVER }}
           build-args: |
             PG_VERSION=${{ matrix.version }}
             SEMVER=${{ env.SEMVER }}
