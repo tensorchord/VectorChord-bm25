@@ -6,6 +6,7 @@ use pgrx::{
 };
 use serde::{Deserialize, Serialize};
 use tocken::tokenizer::Tokenizer as Tockenizer;
+use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 use validator::{Validate, ValidationError};
 
@@ -85,28 +86,30 @@ pub fn unicode_tokenizer_split(text: &str, config: &[u8]) -> Vec<String> {
 
 fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<String> {
     let mut tokens = Vec::new();
-    for word in text.unicode_words() {
-        // trim `'s` for English
-        let mut lowercase = word.to_lowercase();
-        if lowercase.len() >= 2 && lowercase.ends_with("s") {
-            let chars = lowercase.chars().collect::<Vec<char>>();
-            let c = chars[chars.len() - 2];
-            if c == '\'' || c == '\u{2019}' || c == '\u{FF07}' {
-                lowercase = chars[..chars.len() - 2].iter().collect::<String>();
-            }
-        }
-        let token = tantivy_stemmers::algorithms::english_porter(&lowercase).to_string();
-        if token.is_empty() {
+
+    let stemmer = rust_stemmers::Stemmer::create(rust_stemmers::Algorithm::English);
+
+    let lowercase_text = text.to_lowercase();
+    let normalized_text = lowercase_text.nfkd().collect::<String>();
+    for word in normalized_text.unicode_words() {
+        // skip non-alphanumeric words
+        if !word.chars().any(char::is_alphanumeric) {
             continue;
         }
+
+        // skip stopwords
         let stopwords = match config.stopwords {
             StopWordsKind::Lucene => &*STOP_WORDS_LUCENE,
             StopWordsKind::Nltk => &*STOP_WORDS_NLTK,
             StopWordsKind::LucenePlusNltk => &*STOP_WORDS_LUCENE_PLUS_NLTK,
         };
-        if !stopwords.contains(&token) {
-            tokens.push(token);
+        if stopwords.contains(word) {
+            continue;
         }
+
+        let word = stemmer.stem(word).to_string();
+
+        tokens.push(word);
     }
     tokens
 }
