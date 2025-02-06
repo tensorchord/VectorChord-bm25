@@ -79,7 +79,7 @@ Create the index on the bm25vector column so that we can collect the global docu
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 ```
 
-Now we can calculate the BM25 score between the query and the vectors. Note that the bm25 score is negative, which means the higher the score, the more relevant the document is. We intentionly make it negative so that you can use the default order by to get the most relevant documents first.
+Now we can calculate the BM25 score between the query and the vectors. Note that the bm25 score is negative, which means the higher the score, the more relevant the document is. We intentionally make it negative so that you can use the default order by to get the most relevant documents first.
 
 ```sql
 -- to_bm25query(index_name, query, tokenizer_name)
