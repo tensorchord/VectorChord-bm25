@@ -145,7 +145,7 @@ struct TokenizerConfig {
 
 impl TokenizerConfig {
     fn default_stopwords() -> StopWordsKind {
-        StopWordsKind::LucenePlusNltk
+        StopWordsKind::Nltk
     }
 
     fn validate_unicode(&self) -> Result<(), ValidationError> {
