@@ -75,7 +75,7 @@ jobs:
             $PGRX_IMAGE ./tools/package.sh
           ls ./build
           gh release upload --clobber $SEMVER ./build/postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}-1_${PLATFORM}.deb
-          gh release upload --clobber $SEMVER ./build/postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}-1_${ARCH}-linux-gnu.zip
+          gh release upload --clobber $SEMVER ./build/postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}_${ARCH}-linux-gnu.zip
 
   docker:
     runs-on: ubuntu-latest
