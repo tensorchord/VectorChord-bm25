@@ -38,12 +38,12 @@ jobs:
     strategy:
       matrix:
         version: ["14", "15", "16", "17"]
-        runner: ["ubicloud-standard-4", "ubicloud-standard-4-arm"]
+        runner: ["ubuntu-22.04", "ubuntu-22.04-arm"]
     env:
       PGRX_IMAGE: "ghcr.io/tensorchord/vectorchord-pgrx:0.12.9-nightly-2024-12-25"
       SEMVER: ${{ needs.semver.outputs.SEMVER }}
-      ARCH: ${{ matrix.runner == 'ubicloud-standard-4' && 'x86_64' || 'aarch64' }}
-      PLATFORM: ${{ matrix.runner == 'ubicloud-standard-4' && 'amd64' || 'arm64' }}
+      ARCH: ${{ matrix.runner == 'ubuntu-22.04' && 'x86_64' || 'aarch64' }}
+      PLATFORM: ${{ matrix.runner == 'ubuntu-22.04' && 'amd64' || 'arm64' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -65,15 +65,17 @@ jobs:
 
       - name: Build
         env:
-          VERSION: ${{ matrix.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          docker run --rm -v .:/workspace $CACHE_ENVS $PGRX_IMAGE cargo build --lib --features pg$VERSION --release
-          docker run --rm -v .:/workspace $CACHE_ENVS -e SEMVER=${SEMVER} $PGRX_IMAGE ./tools/schema.sh --features pg$VERSION --release
-          ./tools/package.sh
+          docker run --rm -v .:/workspace $CACHE_ENVS \
+            -e SEMVER=$SEMVER \
+            -e VERSION=${{ matrix.version }} \
+            -e ARCH=$ARCH \
+            -e PLATFORM=$PLATFORM \
+            $PGRX_IMAGE ./tools/package.sh
           ls ./build
-          gh release upload --clobber $SEMVER ./build/vchord-bm25-pg${VERSION}_${SEMVER}_${PLATFORM}.deb
-          gh release upload --clobber $SEMVER ./build/vchord-bm25-pg${VERSION}_${ARCH}-unknown-linux-gnu_${SEMVER}.zip
+          gh release upload --clobber $SEMVER ./build/postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}-1_${PLATFORM}.deb
+          gh release upload --clobber $SEMVER ./build/postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}_${ARCH}-linux-gnu.zip
 
   docker:
     runs-on: ubuntu-latest
@@ -94,7 +96,7 @@ jobs:
         run: |
           mkdir -p build
           for arch in amd64 arm64; do
-            gh release download $SEMVER --pattern "vchord-bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb" --output ./build/vchord-bm25-pg${{ matrix.version }}_${SEMVER}_${arch}.deb
+            gh release download $SEMVER --pattern "postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}-1_${arch}.deb" --output ./build/postgresql-${{ matrix.version }}-vchord-bm25_${SEMVER}-1_${arch}.deb
           done
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -137,4 +139,4 @@ jobs:
           build-args: |
             PG_VERSION=${{ matrix.version }}
             SEMVER=${{ env.SEMVER }}
-            PGVECTOR=0.8.0
+            VCHORD_VERSION=0.2.0

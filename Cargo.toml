@@ -29,7 +29,7 @@ bytemuck = "1.18"
 generator = "0.8.4"
 lazy_static = "1.5"
 lending-iterator = "0.1.7"
-pgrx = { version = "=0.12.8", default-features = false, features = ["cshim"] }
+pgrx = { version = "=0.12.9", default-features = false, features = ["cshim"] }
 regex = "1.11.1"
 rust-stemmers = { git = "https://github.com/tensorchord/rust-stemmers.git" }
 serde = { version = "1.0.217", features = ["derive"] }
