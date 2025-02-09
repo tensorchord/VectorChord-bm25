@@ -23,7 +23,7 @@ BEGIN
             SELECT 1 FROM bm25_catalog.%I WHERE token = new_tokens.token
         )
     )
-    INSERT INTO bm25_catalog.%I (token) SELECT token FROM to_insert ON CONFLICT (token) DO NOTHING', tokenizer_name, target_column, tokenizer_name, tokenizer_name) USING NEW;
+    INSERT INTO bm25_catalog.%I (token) SELECT token FROM to_insert', tokenizer_name, target_column, tokenizer_name, tokenizer_name) USING NEW;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
