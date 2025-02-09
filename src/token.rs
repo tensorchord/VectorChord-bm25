@@ -107,13 +107,19 @@ fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<St
             continue;
         }
 
-        let word = stemmer.stem(word).to_string();
+        let word = stemmer.stem(word);
 
         if word.len() > 8191 {
-            pgrx::warning!("There is a unicode token whose length has exceeded 8191. This may cause postgres to crash. If you need to support long token, welcome to submit an issue to \"https://github.com/tensorchord/VectorChord-bm25/issues\".");
+            pgrx::warning!("There is a unicode token whose length has exceeded 8191. It will be cut off to multiple tokens. If you need to support long token, welcome to submit an issue to \"https://github.com/tensorchord/VectorChord-bm25/issues\".");
+            let mut start = 0;
+            while start < word.len() {
+                let end = std::cmp::min(start + 8191, word.len());
+                tokens.push(word[start..end].to_string());
+                start = end;
+            }
+        } else {
+            tokens.push(word.to_string());
         }
-
-        tokens.push(word);
     }
     tokens
 }
