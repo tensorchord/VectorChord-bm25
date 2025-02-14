@@ -33,7 +33,7 @@ pgrx = { version = "=0.12.9", default-features = false, features = ["cshim"] }
 regex = "1.11.1"
 rust-stemmers = { git = "https://github.com/tensorchord/rust-stemmers.git" }
 serde = { version = "1.0.217", features = ["derive"] }
-stop-words = "0.8.0"
+stop-words = { version = "0.8.0", features = ["nltk"] }
 tantivy-stemmers = { version = "0.4.0", features = [
     "default",
     "english_porter",
