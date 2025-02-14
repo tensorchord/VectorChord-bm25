@@ -71,6 +71,7 @@ Here is what each field means:
 - `tokenizer_name` is case-sensitive. Make sure to use the exact name when calling the `tokenize` function.
 - `tokenizer_name` can only contain alphanumeric characters and underscores, and it must start with an alphabet.
 - `tokenizer_name` is unique. You cannot create two tokenizers with the same name.
+- The max legnth of a token in unicode tokenizer is `8191`. If a token is longer than this, it will be cut off to multiple tokens. If you need to support longer tokens, welcome to submit an issue [here](https://github.com/tensorchord/VectorChord-bm25/issues).
 
 ## Contribution
 
