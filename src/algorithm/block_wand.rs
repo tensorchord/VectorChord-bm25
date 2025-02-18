@@ -202,12 +202,16 @@ fn block_max_was_too_low_advance_one_scorer(
 
 fn restore_ordering(indexes: &mut [(u32, u32)], ord: usize) {
     let doc = indexes[ord].1;
-    for i in ord + 1..indexes.len() {
-        if indexes[i].1 >= doc {
-            break;
-        }
-        indexes.swap(i, i - 1);
-    }
+    let pos = match indexes[(ord + 1)..]
+        .iter()
+        .position(|(_, docid)| *docid >= doc)
+    {
+        Some(pos) => pos,
+        None => indexes.len() - ord - 1,
+    };
+    let tmp = indexes[ord];
+    indexes.copy_within(ord + 1..ord + 1 + pos, ord);
+    indexes[ord + pos] = tmp;
 }
 
 fn align_scorers(
