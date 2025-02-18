@@ -90,50 +90,64 @@ pub fn block_wand(
     for s in &mut scorers {
         s.posting.decode_block();
     }
-    scorers.sort_by_key(|s| s.posting.docid());
+
+    // (scorer index, docid)
+    let mut indexes = scorers
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (u32::try_from(i).unwrap(), s.posting.docid()))
+        .collect::<Vec<_>>();
+    indexes.sort_unstable_by_key(|(_, docid)| *docid);
 
     while let Some((before_pivot_len, pivot_len, pivot_doc)) =
-        find_pivot_doc(&scorers, computer.threshold())
+        find_pivot_doc(&indexes, &scorers, computer.threshold())
     {
-        let block_max_score_upperbound: f32 = scorers[..pivot_len]
-            .iter_mut()
-            .map(|scorer| {
+        let block_max_score_upperbound: f32 = indexes[..pivot_len]
+            .iter()
+            .map(|(i, _)| {
+                let scorer = &mut scorers[*i as usize];
                 scorer.posting.shallow_seek(pivot_doc);
                 scorer.posting.block_max_score(&scorer.weight)
             })
             .sum();
 
         if block_max_score_upperbound <= computer.threshold() {
-            block_max_was_too_low_advance_one_scorer(&mut scorers, pivot_len);
+            block_max_was_too_low_advance_one_scorer(&mut indexes, &mut scorers, pivot_len);
             continue;
         }
 
-        if !align_scorers(&mut scorers, pivot_doc, before_pivot_len) {
+        if !align_scorers(&mut indexes, &mut scorers, pivot_doc, before_pivot_len) {
             continue;
         }
 
         if !delete_bitmap_reader.is_delete(pivot_doc) {
             let len = id_to_fieldnorm(fieldnorm_reader.read(pivot_doc));
-            let score = scorers[..pivot_len]
+            let score = indexes[..pivot_len]
                 .iter()
-                .map(|scorer| scorer.weight.score(len, scorer.posting.freq()))
+                .map(|(i, _)| {
+                    let scorer = &scorers[*i as usize];
+                    scorer.weight.score(len, scorer.posting.freq())
+                })
                 .sum();
             computer.push(score, pivot_doc);
         }
 
-        advance_all_scorers_on_pivot(&mut scorers, pivot_len);
+        advance_all_scorers_on_pivot(&mut indexes, &mut scorers, pivot_len);
     }
 }
 
-fn find_pivot_doc(scorers: &[SealedScorer], threshold: f32) -> Option<(usize, usize, u32)> {
+fn find_pivot_doc(
+    indexes: &[(u32, u32)],
+    scorers: &[SealedScorer],
+    threshold: f32,
+) -> Option<(usize, usize, u32)> {
     let mut max_score = 0.0;
     let mut before_pivot_len = 0;
     let mut pivot_doc = u32::MAX;
-    while before_pivot_len < scorers.len() {
-        let scorer = &scorers[before_pivot_len];
-        max_score += scorer.max_score;
+    while before_pivot_len < indexes.len() {
+        max_score += scorers[indexes[before_pivot_len].0 as usize].max_score;
         if max_score > threshold {
-            pivot_doc = scorer.posting.docid();
+            pivot_doc = indexes[before_pivot_len].1;
             break;
         }
         before_pivot_len += 1;
@@ -143,72 +157,99 @@ fn find_pivot_doc(scorers: &[SealedScorer], threshold: f32) -> Option<(usize, us
     }
 
     let mut pivot_len = before_pivot_len + 1;
-    pivot_len += scorers[pivot_len..]
+    pivot_len += indexes[pivot_len..]
         .iter()
-        .take_while(|term_scorer| term_scorer.posting.docid() == pivot_doc)
+        .take_while(|(_, docid)| *docid == pivot_doc)
         .count();
     Some((before_pivot_len, pivot_len, pivot_doc))
 }
 
-fn block_max_was_too_low_advance_one_scorer(scorers: &mut [SealedScorer], pivot_len: usize) {
+fn block_max_was_too_low_advance_one_scorer(
+    indexes: &mut [(u32, u32)],
+    scorers: &mut [SealedScorer],
+    pivot_len: usize,
+) {
     let mut scorer_to_seek = pivot_len - 1;
-    let mut global_max_score = scorers[scorer_to_seek].max_score;
-    let mut doc_to_seek_after = scorers[scorer_to_seek].posting.last_doc_in_block();
+    let mut global_max_score = scorers[indexes[scorer_to_seek].0 as usize].max_score;
+    let mut doc_to_seek_after = scorers[indexes[scorer_to_seek].0 as usize]
+        .posting
+        .last_doc_in_block();
 
     for scorer_ord in (0..pivot_len - 1).rev() {
-        let scorer = &scorers[scorer_ord];
+        let scorer = &scorers[indexes[scorer_ord].0 as usize];
         if scorer.posting.last_doc_in_block() <= doc_to_seek_after {
             doc_to_seek_after = scorer.posting.last_doc_in_block();
         }
-        if scorers[scorer_ord].max_score > global_max_score {
-            global_max_score = scorers[scorer_ord].max_score;
+        if scorer.max_score > global_max_score {
+            global_max_score = scorer.max_score;
             scorer_to_seek = scorer_ord;
         }
     }
     doc_to_seek_after = doc_to_seek_after.saturating_add(1);
 
-    for scorer in &mut scorers[pivot_len..] {
-        if scorer.posting.docid() <= doc_to_seek_after {
-            doc_to_seek_after = scorer.posting.docid();
+    for (_, docid) in &indexes[pivot_len..] {
+        if *docid <= doc_to_seek_after {
+            doc_to_seek_after = *docid;
         }
     }
-    scorers[scorer_to_seek].posting.seek(doc_to_seek_after);
+    let new_docid = scorers[indexes[scorer_to_seek].0 as usize]
+        .posting
+        .seek(doc_to_seek_after);
+    indexes[scorer_to_seek].1 = new_docid;
 
-    restore_ordering(scorers, scorer_to_seek);
+    restore_ordering(indexes, scorer_to_seek);
 }
 
-fn restore_ordering(term_scorers: &mut [SealedScorer], ord: usize) {
-    let doc = term_scorers[ord].posting.docid();
-    for i in ord + 1..term_scorers.len() {
-        if term_scorers[i].posting.docid() >= doc {
+fn restore_ordering(indexes: &mut [(u32, u32)], ord: usize) {
+    let doc = indexes[ord].1;
+    for i in ord + 1..indexes.len() {
+        if indexes[i].1 >= doc {
             break;
         }
-        term_scorers.swap(i, i - 1);
+        indexes.swap(i, i - 1);
     }
 }
 
 fn align_scorers(
-    term_scorers: &mut Vec<SealedScorer>,
+    indexes: &mut Vec<(u32, u32)>,
+    term_scorers: &mut [SealedScorer],
     pivot_doc: u32,
     before_pivot_len: usize,
 ) -> bool {
     for i in (0..before_pivot_len).rev() {
-        let new_doc = term_scorers[i].posting.seek(pivot_doc);
+        let new_doc = term_scorers[indexes[i].0 as usize].posting.seek(pivot_doc);
+        indexes[i].1 = new_doc;
         if new_doc != pivot_doc {
             if new_doc == TERMINATED_DOC {
-                term_scorers.swap_remove(i);
+                indexes.remove(i);
+            } else {
+                restore_ordering(indexes, i);
             }
-            restore_ordering(term_scorers, i);
             return false;
         }
     }
     true
 }
 
-fn advance_all_scorers_on_pivot(term_scorers: &mut Vec<SealedScorer>, pivot_len: usize) {
-    for scorer in &mut term_scorers[..pivot_len] {
+fn advance_all_scorers_on_pivot(
+    indexes: &mut Vec<(u32, u32)>,
+    term_scorers: &mut [SealedScorer],
+    pivot_len: usize,
+) {
+    for (i, docid) in &mut indexes[..pivot_len] {
+        let scorer = &mut term_scorers[*i as usize];
         scorer.posting.next_with_auto_decode();
+        if scorer.posting.completed() {
+            *docid = TERMINATED_DOC;
+        } else {
+            *docid = scorer.posting.docid();
+        }
     }
-    term_scorers.retain(|scorer| !scorer.posting.completed());
-    term_scorers.sort_unstable_by_key(|scorer| scorer.posting.docid());
+    indexes.sort_unstable_by_key(|(_, docid)| *docid);
+    let remove_size = indexes
+        .iter()
+        .rev()
+        .take_while(|(_, docid)| *docid == TERMINATED_DOC)
+        .count();
+    indexes.truncate(indexes.len() - remove_size);
 }
