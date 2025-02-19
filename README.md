@@ -1,6 +1,14 @@
-# VectorChord-BM25
+<div align="center">
+<img src="https://github.com/tensorchord/marketing-material/raw/main/vectorchord/logo-light.svg" width="200" alt="VectorChord Logo">
+<h4 align=center></h4>
+</div>
 
-A PostgreSQL extension for bm25 ranking algorithm. We implemented the Block-WeakAnd Algorithms for BM25 ranking inside PostgreSQL. This extension is currently in **alpha** stage and not recommended for production use. We're still iterating on the tokenizer API to support more configurations and languages. The interface may change in the future.
+<p align=center>
+<a href="https://discord.gg/KqswhpVgdU"><img alt="discord invitation link" src="https://dcbadge.vercel.app/api/server/KqswhpVgdU?style=flat"></a>
+<a href="https://twitter.com/TensorChord"><img src="https://img.shields.io/twitter/follow/tensorchord?style=social" alt="Twitter" /></a>
+</p>
+
+VectorChord-BM25 is a PostgreSQL extension for bm25 ranking algorithm. We implemented the Block-WeakAnd Algorithms for BM25 ranking inside PostgreSQL. This extension is currently in **alpha** stage and not recommended for production use. We're still iterating on the tokenizer API to support more configurations and languages. The interface may change in the future.
 
 ## Getting Started
 For new users, we recommend using the Docker image to get started quickly.
