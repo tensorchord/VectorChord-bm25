@@ -102,7 +102,15 @@ FROM documents
 ORDER BY rank
 LIMIT 10;
 ```
+## Tokenizer
 
+Currently, we support the following tokenizers:
+
+- `Bert`: default uncased BERT tokenizer.
+- `Tocken`: a Unicode tokenizer pre-trained on wiki-103-raw with `min_freq=10`.
+- `Unicode`: a Unicode tokenizer that will be trained on your data.
+
+For more details, check the [tokenizer](./tokenizer.md) document.
 
 <!-- ## Performance Benchmark
 
@@ -175,8 +183,6 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 - `tokenize(content text, tokenizer_name text) RETURNS bm25vector`: Tokenize the content text into a BM25 vector. 
 - `to_bm25query(index_name regclass, query text, tokenizer_name text) RETURNS bm25query`: Convert the input text into a BM25 query.
 - `bm25vector <&> bm25query RETURNS float4`: Calculate the **negative** BM25 score between the BM25 vector and query.
-
-For more information about tokenizer, check the [tokenizer](./tokenizer.md) document.
 
 ### GUCs
 
