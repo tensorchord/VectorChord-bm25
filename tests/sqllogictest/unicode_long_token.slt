@@ -17,8 +17,9 @@ INSERT INTO documents (passage) VALUES
 ('Relational databases such as PostgreSQL can handle both structured and unstructured data.'),
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
+# We need to use random string to test, because btree will compress long text.
 statement ok
-INSERT INTO documents (passage) SELECT REPEAT('SQL', 10000);
+INSERT INTO documents (passage) SELECT array_to_string(array(SELECT chr((65 + (random() * 25))::int) FROM generate_series(1, 10000)), ''); 
 
 statement ok
 SELECT create_tokenizer('documents_tokenizer', $$
