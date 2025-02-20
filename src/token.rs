@@ -13,31 +13,29 @@ use validator::{Validate, ValidationError};
 use crate::datatype::Bm25VectorOutput;
 
 static BERT_BASE_UNCASED_BYTES: &[u8] = include_bytes!("../tokenizer/bert_base_uncased.json");
-static TOCKEN: &[u8] = include_bytes!("../tokenizer/wiki_tocken.json");
+static TOCKEN_BYTES: &[u8] = include_bytes!("../tokenizer/wiki_tocken.json");
+
+static LUCENE_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/lucene_english");
+static ISO_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/iso_english");
+static NLTK_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/nltk_english");
 
 const TOKEN_PATTERN: &str = r"(?u)\b\w\w+\b";
 
 lazy_static::lazy_static! {
     static ref TOKEN_PATTERN_RE: regex::Regex = regex::Regex::new(TOKEN_PATTERN).unwrap();
-    static ref STOP_WORDS_LUCENE: HashSet<String> = {
-        [
-            "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is",
-            "it", "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there",
-            "these", "they", "this", "to", "was", "will", "with",
-        ].iter().map(|s| s.to_string()).collect()
-    };
-    static ref STOP_WORDS_NLTK: HashSet<String> = {
-        let words = stop_words::get(stop_words::LANGUAGE::English);
-        words.into_iter().collect()
-    };
-    static ref STOP_WORDS_LUCENE_PLUS_NLTK: HashSet<String> = {
-        let mut words = STOP_WORDS_LUCENE.clone();
-        words.extend(STOP_WORDS_NLTK.iter().cloned());
-        words
-    };
 
     static ref BERT_TOKENIZER: BertWithStemmerAndSplit = BertWithStemmerAndSplit::new();
     static ref TOCKENIZER: Tocken = Tocken::new();
+
+    static ref STOP_WORDS_LUCENE: HashSet<String> = {
+        LUCENE_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
+    };
+    static ref STOP_WORDS_NLTK: HashSet<String> = {
+        NLTK_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
+    };
+    static ref STOP_WORDS_ISO: HashSet<String> = {
+        ISO_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
+    };
 }
 
 struct BertWithStemmerAndSplit(tokenizers::Tokenizer);
@@ -69,7 +67,7 @@ struct Tocken(Tockenizer);
 impl Tocken {
     fn new() -> Self {
         Self(tocken::tokenizer::Tokenizer::loads(
-            std::str::from_utf8(TOCKEN).unwrap(),
+            std::str::from_utf8(TOCKEN_BYTES).unwrap(),
         ))
     }
 
@@ -101,7 +99,7 @@ fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<St
         let stopwords = match config.stopwords {
             StopWordsKind::Lucene => &*STOP_WORDS_LUCENE,
             StopWordsKind::Nltk => &*STOP_WORDS_NLTK,
-            StopWordsKind::LucenePlusNltk => &*STOP_WORDS_LUCENE_PLUS_NLTK,
+            StopWordsKind::Iso => &*STOP_WORDS_ISO,
         };
         if stopwords.contains(word) {
             continue;
@@ -137,7 +135,7 @@ enum TokenizerKind {
 enum StopWordsKind {
     Lucene,
     Nltk,
-    LucenePlusNltk,
+    Iso,
 }
 
 #[derive(Clone, Serialize, Deserialize, Validate)]
