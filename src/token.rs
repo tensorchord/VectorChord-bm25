@@ -82,6 +82,8 @@ pub fn unicode_tokenizer_split(text: &str, config: &[u8]) -> Vec<String> {
     unicode_tokenizer_split_inner(text, &config)
 }
 
+const TOKEN_LENGTH_LIMIT: usize = 2600;
+
 fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<String> {
     let mut tokens = Vec::new();
 
@@ -107,11 +109,11 @@ fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<St
 
         let word = stemmer.stem(word);
 
-        if word.len() > 8191 {
-            pgrx::warning!("There is a unicode token whose length has exceeded 8191. It will be cut off to multiple tokens. If you need to support long token, welcome to submit an issue to \"https://github.com/tensorchord/VectorChord-bm25/issues\".");
+        if word.len() > TOKEN_LENGTH_LIMIT {
+            pgrx::warning!("There is a unicode token whose length has exceeded TOKEN_LENGTH_LIMIT({TOKEN_LENGTH_LIMIT}). It will be cut off to multiple tokens. If you need to support long token, welcome to submit an issue to \"https://github.com/tensorchord/VectorChord-bm25/issues\".");
             let mut start = 0;
             while start < word.len() {
-                let end = std::cmp::min(start + 8191, word.len());
+                let end = std::cmp::min(start + TOKEN_LENGTH_LIMIT, word.len());
                 tokens.push(word[start..end].to_string());
                 start = end;
             }
