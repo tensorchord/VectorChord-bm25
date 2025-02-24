@@ -37,6 +37,7 @@ And make sure to add vchord_bm25.so to the shared_preload_libraries in postgresq
 -- Add vchord-bm25 to shared_preload_libraries --
 ALTER SYSTEM SET shared_preload_libraries = 'vchord_bm25.so';
 ALTER SYSTEM SET search_path TO "$user", public, bm25_catalog;
+SELECT pg_reload_conf();
 ```
 
 ## Usage
