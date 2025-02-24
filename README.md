@@ -21,22 +21,23 @@ docker run \
   -d ghcr.io/tensorchord/vchord_bm25-postgres:pg17-v0.1.0
 ```
 
-Then you can connect to the database using the psql command line tool. The default username is postgres, and the default password is mysecretpassword.
+Once everything’s set up, you can connect to the database using the `psql` command line tool. The default username is `postgres`, and the default password is `mysecretpassword`. Here’s how to connect:
 
 ```sh
 psql -h localhost -p 5432 -U postgres
 ```
 
-Run the following SQL to ensure the extension is enabled.
+After connecting, run the following SQL to make sure the extension is enabled:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;
 ```
-And make sure to add vchord_bm25.so to the shared_preload_libraries in postgresql.conf and add bm25_catalog to search path.
+
+Then, don’t forget to add `bm25_catalog` to the search path:
+
 ```sql
--- Add vchord-bm25 to shared_preload_libraries --
-ALTER SYSTEM SET shared_preload_libraries = 'vchord_bm25.so';
 ALTER SYSTEM SET search_path TO "$user", public, bm25_catalog;
+SELECT pg_reload_conf();
 ```
 
 ## Usage
@@ -92,7 +93,7 @@ Now we can calculate the BM25 score between the query and the vectors. Note that
 ```sql
 -- to_bm25query(index_name, query, tokenizer_name)
 -- <&> is the operator to compute the bm25 score
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'PostgreSQL', 'Bert') AS bm25_score;
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'PostgreSQL', 'Bert') AS bm25_score FROM documents;
 ```
 
 And you can use the order by to utilize the index to get the most relevant documents first and faster.
