@@ -93,7 +93,7 @@ Now we can calculate the BM25 score between the query and the vectors. Note that
 ```sql
 -- to_bm25query(index_name, query, tokenizer_name)
 -- <&> is the operator to compute the bm25 score
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'PostgreSQL', 'Bert') AS bm25_score;
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'PostgreSQL', 'Bert') AS bm25_score FROM documents;
 ```
 
 And you can use the order by to utilize the index to get the most relevant documents first and faster.
