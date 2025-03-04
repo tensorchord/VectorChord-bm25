@@ -19,6 +19,9 @@ static LUCENE_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/lucene_englis
 static ISO_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/iso_english");
 static NLTK_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/nltk_english");
 
+//other languages
+static GERMAN_STOPWORDS: &str = include_str!("../stopwords/german");
+
 const TOKEN_PATTERN: &str = r"(?u)\b\w\w+\b";
 
 lazy_static::lazy_static! {
@@ -35,6 +38,9 @@ lazy_static::lazy_static! {
     };
     static ref STOP_WORDS_ISO: HashSet<String> = {
         ISO_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
+    };
+    static ref STOP_WORDS_GERMAN: HashSet<String> = {
+        GERMAN_STOPWORDS.lines().map(|s| s.to_string()).collect()
     };
 }
 
