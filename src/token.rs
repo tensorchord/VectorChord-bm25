@@ -108,6 +108,7 @@ fn unicode_tokenizer_split_inner(text: &str, config: &TokenizerConfig) -> Vec<St
             StopWordsKind::Lucene => &*STOP_WORDS_LUCENE,
             StopWordsKind::Nltk => &*STOP_WORDS_NLTK,
             StopWordsKind::Iso => &*STOP_WORDS_ISO,
+            StopWordsKind::German => &*STOP_WORDS_GERMAN,
         };
         if stopwords.contains(word) {
             continue;
@@ -144,6 +145,7 @@ enum StopWordsKind {
     Lucene,
     Nltk,
     Iso,
+    German,
 }
 
 #[derive(Clone, Serialize, Deserialize, Validate)]
