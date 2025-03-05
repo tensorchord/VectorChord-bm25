@@ -90,7 +90,7 @@ mod tests {
             .collect::<Vec<_>>();
         scores.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
         scores.dedup();
-        scores.shuffle(&mut rand::thread_rng());
+        scores.shuffle(&mut rand::rng());
 
         for score in scores {
             let id = rand::random::<u32>();

@@ -115,17 +115,17 @@ mod test {
     fn test_random() {
         fn vec(n: usize) -> Vec<u32> {
             let mut vec = vec![0u32; n];
-            vec.fill_with(|| rand::thread_rng().gen_range(0..100_000));
+            vec.fill_with(|| rand::rng().random_range(0..100_000));
             vec.sort();
             vec
         }
 
         fn vecs() -> Vec<Vec<u32>> {
             use rand::Rng;
-            let m = rand::thread_rng().gen_range(0..100);
+            let m = rand::rng().random_range(0..100);
             let mut vecs = Vec::new();
             for _ in 0..m {
-                let n = rand::thread_rng().gen_range(0..10000);
+                let n = rand::rng().random_range(0..10000);
                 vecs.push(vec(n));
             }
             vecs
