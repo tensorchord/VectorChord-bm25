@@ -4,15 +4,10 @@
 use std::num::NonZeroU32;
 
 use bitpacking::{BitPacker, BitPacker4x};
-use lazy_static::lazy_static;
 
 use super::{BlockDecodeTrait, BlockEncodeTrait};
 
 const BLOCK_SIZE: usize = 128;
-
-lazy_static! {
-    static ref BITPACKER: BitPacker4x = BitPacker4x::new();
-}
 
 pub struct DeltaBitpackEncode {
     output: Vec<u8>,
@@ -34,21 +29,23 @@ impl BlockEncodeTrait for DeltaBitpackEncode {
         assert!(docids.len() == freqs.len());
         assert!(docids.len() == BLOCK_SIZE);
 
+        let bit_packer = BitPacker4x::new();
+
         self.output.clear();
         freqs.iter_mut().for_each(|v| *v -= 1);
         let offset = offset.map(|x| x.get());
 
-        let docid_bits = BITPACKER.num_bits_strictly_sorted(offset, docids);
-        let freq_bits = BITPACKER.num_bits(freqs);
+        let docid_bits = bit_packer.num_bits_strictly_sorted(offset, docids);
+        let freq_bits = bit_packer.num_bits(freqs);
         let docid_size = compress_size(docid_bits, docids.len());
         let freq_size = compress_size(freq_bits, freqs.len());
         self.output.extend_from_slice(&[docid_bits, freq_bits]);
         self.output.resize(docid_size + freq_size + 2, 0);
 
         let mut output = &mut self.output[2..];
-        BITPACKER.compress_strictly_sorted(offset, docids, output, docid_bits);
+        bit_packer.compress_strictly_sorted(offset, docids, output, docid_bits);
         output = &mut output[docid_size..];
-        BITPACKER.compress(freqs, output, freq_bits);
+        bit_packer.compress(freqs, output, freq_bits);
         &self.output
     }
 }
@@ -107,13 +104,15 @@ impl BlockDecodeTrait for DeltaBitpackDecodeInner {
     fn decode(&mut self, mut data: &[u8], offset: Option<NonZeroU32>) {
         let offset = offset.map(|x| x.get());
 
+        let bit_packer = BitPacker4x::new();
+
         let docid_bits = data[0];
         let freq_bits = data[1];
         data = &data[2..];
         let docid_size =
-            BITPACKER.decompress_strictly_sorted(offset, data, &mut self.docids, docid_bits);
+            bit_packer.decompress_strictly_sorted(offset, data, &mut self.docids, docid_bits);
         data = &data[docid_size..];
-        BITPACKER.decompress(data, &mut self.freqs, freq_bits);
+        bit_packer.decompress(data, &mut self.freqs, freq_bits);
 
         self.freqs.iter_mut().for_each(|v| *v += 1);
         self.offset = 0;
@@ -310,7 +309,7 @@ mod tests {
         let mut encoder = DeltaBitpackEncode::new();
         let mut decoder = DeltaBitpackDecode::new();
 
-        let mut docids = rand::seq::index::sample(&mut rand::thread_rng(), 10000, BLOCK_SIZE)
+        let mut docids = rand::seq::index::sample(&mut rand::rng(), 10000, BLOCK_SIZE)
             .into_iter()
             .map(|x| x as u32)
             .collect::<Vec<_>>();
@@ -342,7 +341,7 @@ mod tests {
         let mut encoder = DeltaBitpackEncode::new();
         let mut decoder = DeltaBitpackDecode::new();
 
-        let mut docids = rand::seq::index::sample(&mut rand::thread_rng(), 10000, BLOCK_SIZE)
+        let mut docids = rand::seq::index::sample(&mut rand::rng(), 10000, BLOCK_SIZE)
             .into_iter()
             .map(|x| x as u32)
             .collect::<Vec<_>>();
@@ -374,7 +373,7 @@ mod tests {
         let mut encoder = DeltaBitpackEncode::new();
         let mut decoder = DeltaBitpackDecode::new();
 
-        let mut docids = rand::seq::index::sample(&mut rand::thread_rng(), 10000, BLOCK_SIZE)
+        let mut docids = rand::seq::index::sample(&mut rand::rng(), 10000, BLOCK_SIZE)
             .into_iter()
             .map(|x| x as u32)
             .collect::<Vec<_>>();

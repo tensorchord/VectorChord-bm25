@@ -1,8 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::LazyLock,
+};
 
 use pgrx::{
     extension_sql_file, pg_sys::panic::ErrorReportable, pg_trigger, prelude::PgHeapTuple,
-    spi::SpiClient, IntoDatum, WhoAllocated,
+    spi::SpiClient, WhoAllocated,
 };
 use serde::{Deserialize, Serialize};
 use tocken::tokenizer::Tokenizer as Tockenizer;
@@ -23,26 +26,33 @@ static NLTK_ENGLISH_STOPWORDS: &str = include_str!("../stopwords/nltk_english");
 static GERMAN_STOPWORDS: &str = include_str!("../stopwords/german");
 
 const TOKEN_PATTERN: &str = r"(?u)\b\w\w+\b";
+static TOKEN_PATTERN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(TOKEN_PATTERN).unwrap());
 
-lazy_static::lazy_static! {
-    static ref TOKEN_PATTERN_RE: regex::Regex = regex::Regex::new(TOKEN_PATTERN).unwrap();
+static BERT_TOKENIZER: LazyLock<BertWithStemmerAndSplit> =
+    LazyLock::new(BertWithStemmerAndSplit::new);
+static TOCKENIZER: LazyLock<Tocken> = LazyLock::new(Tocken::new);
 
-    static ref BERT_TOKENIZER: BertWithStemmerAndSplit = BertWithStemmerAndSplit::new();
-    static ref TOCKENIZER: Tocken = Tocken::new();
-
-    static ref STOP_WORDS_LUCENE: HashSet<String> = {
-        LUCENE_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
-    };
-    static ref STOP_WORDS_NLTK: HashSet<String> = {
-        NLTK_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
-    };
-    static ref STOP_WORDS_ISO: HashSet<String> = {
-        ISO_ENGLISH_STOPWORDS.lines().map(|s| s.to_string()).collect()
-    };
-    static ref STOP_WORDS_GERMAN: HashSet<String> = {
-        GERMAN_STOPWORDS.lines().map(|s| s.to_string()).collect()
-    };
-}
+static STOP_WORDS_LUCENE: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    LUCENE_ENGLISH_STOPWORDS
+        .lines()
+        .map(|s| s.to_string())
+        .collect()
+});
+static STOP_WORDS_NLTK: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    NLTK_ENGLISH_STOPWORDS
+        .lines()
+        .map(|s| s.to_string())
+        .collect()
+});
+static STOP_WORDS_ISO: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    ISO_ENGLISH_STOPWORDS
+        .lines()
+        .map(|s| s.to_string())
+        .collect()
+});
+static STOP_WORDS_GERMAN: LazyLock<HashSet<String>> =
+    LazyLock::new(|| GERMAN_STOPWORDS.lines().map(|s| s.to_string()).collect());
 
 struct BertWithStemmerAndSplit(tokenizers::Tokenizer);
 
@@ -201,21 +211,14 @@ pub fn create_tokenizer(tokenizer_name: &str, config_str: &str) {
         panic!("Invalid tokenizer config, Details: {}", e);
     }
 
-    pgrx::Spi::connect(|mut client| {
+    pgrx::Spi::connect_mut(|client| {
         let query = "INSERT INTO bm25_catalog.tokenizers (name, config) VALUES ($1, $2)";
-        let args = Some(vec![
-            (
-                pgrx::PgBuiltInOids::TEXTOID.oid(),
-                tokenizer_name.into_datum(),
-            ),
-            (
-                pgrx::PgBuiltInOids::BYTEAOID.oid(),
-                bincode::serialize(&config).unwrap().into_datum(),
-            ),
-        ]);
-        client.update(query, None, args).unwrap_or_report();
+        let config_str = bincode::serialize(&config).unwrap();
+        client
+            .update(query, None, &[tokenizer_name.into(), config_str.into()])
+            .unwrap_or_report();
         if matches!(config.tokenizer, TokenizerKind::Unicode) {
-            create_unicode_tokenizer_table(&mut client, tokenizer_name, &config);
+            create_unicode_tokenizer_table(client, tokenizer_name, &config);
         }
     });
 }
@@ -226,13 +229,11 @@ fn drop_tokenizer(tokenizer_name: &str) {
         panic!("Invalid tokenizer name: {}, Details: {}", tokenizer_name, e);
     }
 
-    pgrx::Spi::connect(|mut client| {
+    pgrx::Spi::connect_mut(|client| {
         let query = "SELECT config FROM bm25_catalog.tokenizers WHERE name = $1";
-        let args = Some(vec![(
-            pgrx::PgBuiltInOids::TEXTOID.oid(),
-            tokenizer_name.into_datum(),
-        )]);
-        let mut rows = client.select(query, None, args).unwrap_or_report();
+        let mut rows = client
+            .select(query, None, &[tokenizer_name.into()])
+            .unwrap_or_report();
         if rows.len() != 1 {
             panic!("Tokenizer not found");
         }
@@ -247,21 +248,19 @@ fn drop_tokenizer(tokenizer_name: &str) {
         if matches!(config.tokenizer, TokenizerKind::Unicode) {
             let table_name = format!("bm25_catalog.\"{}\"", tokenizer_name);
             let drop_table = format!("DROP TABLE IF EXISTS {}", table_name);
-            client.update(&drop_table, None, None).unwrap_or_report();
+            client.update(&drop_table, None, &[]).unwrap_or_report();
             let drop_trigger = format!(
                 "DROP TRIGGER IF EXISTS \"{}_trigger\" ON {}",
                 tokenizer_name,
                 config.table.unwrap()
             );
-            client.update(&drop_trigger, None, None).unwrap_or_report();
+            client.update(&drop_trigger, None, &[]).unwrap_or_report();
         }
 
         let query = "DELETE FROM bm25_catalog.tokenizers WHERE name = $1";
-        let args = Some(vec![(
-            pgrx::PgBuiltInOids::TEXTOID.oid(),
-            tokenizer_name.into_datum(),
-        )]);
-        client.update(query, None, args).unwrap_or_report();
+        client
+            .update(query, None, &[tokenizer_name.into()])
+            .unwrap_or_report();
     });
 }
 
@@ -315,10 +314,10 @@ fn create_unicode_tokenizer_table(
         "#,
         table_name
     );
-    client.update(&create_table, None, None).unwrap_or_report();
+    client.update(&create_table, None, &[]).unwrap_or_report();
 
     let select_text = format!("SELECT {} FROM {}", column, target_table);
-    let rows = client.select(&select_text, None, None).unwrap_or_report();
+    let rows = client.select(&select_text, None, &[]).unwrap_or_report();
     let mut tokens = HashSet::new();
     for row in rows {
         let text: &str = row.get(1).unwrap_or_report().expect("no text value");
@@ -333,11 +332,9 @@ fn create_unicode_tokenizer_table(
         table_name
     );
     for token in tokens {
-        let args = Some(vec![(
-            pgrx::PgBuiltInOids::TEXTOID.oid(),
-            token.into_datum(),
-        )]);
-        client.update(&insert_text, None, args).unwrap_or_report();
+        client
+            .update(&insert_text, None, &[token.into()])
+            .unwrap_or_report();
     }
 
     let trigger = format!(
@@ -350,7 +347,7 @@ fn create_unicode_tokenizer_table(
         "#,
         name, column, target_table, name, column
     );
-    client.update(&trigger, None, None).unwrap_or_report();
+    client.update(&trigger, None, &[]).unwrap_or_report();
 }
 
 fn unicode_tokenize(
@@ -364,11 +361,9 @@ fn unicode_tokenize(
         "SELECT id, token FROM bm25_catalog.\"{}\" WHERE token = ANY($1)",
         tokenizer_name
     );
-    let args = Some(vec![(
-        pgrx::PgBuiltInOids::TEXTARRAYOID.oid(),
-        tokens.clone().into_datum(),
-    )]);
-    let rows = client.select(&query, None, args).unwrap_or_report();
+    let rows = client
+        .select(&query, None, &[tokens.clone().into()])
+        .unwrap_or_report();
 
     let mut token_map = HashMap::new();
     for row in rows {
@@ -397,11 +392,9 @@ pub fn tokenize(content: &str, tokenizer_name: &str) -> Bm25VectorOutput {
 fn custom_tokenize(text: &str, tokenizer_name: &str) -> Vec<u32> {
     pgrx::Spi::connect(|client| {
         let query = "SELECT config FROM bm25_catalog.tokenizers WHERE name = $1";
-        let args = Some(vec![(
-            pgrx::PgBuiltInOids::TEXTOID.oid(),
-            tokenizer_name.into_datum(),
-        )]);
-        let mut rows = client.select(query, None, args).unwrap_or_report();
+        let mut rows = client
+            .select(query, None, &[tokenizer_name.into()])
+            .unwrap_or_report();
         if rows.len() != 1 {
             panic!("Tokenizer not found");
         }
@@ -416,7 +409,7 @@ fn custom_tokenize(text: &str, tokenizer_name: &str) -> Vec<u32> {
         match config.tokenizer {
             TokenizerKind::Bert => BERT_TOKENIZER.encode(text),
             TokenizerKind::Tocken => TOCKENIZER.encode(text),
-            TokenizerKind::Unicode => unicode_tokenize(&client, text, tokenizer_name, &config),
+            TokenizerKind::Unicode => unicode_tokenize(client, text, tokenizer_name, &config),
         }
     })
 }
