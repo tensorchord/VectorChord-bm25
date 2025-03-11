@@ -1,0 +1,4 @@
+query T
+SELECT '{1, 2, 1}'::int[]::bm25vector;
+----
+{1:2, 2:1}

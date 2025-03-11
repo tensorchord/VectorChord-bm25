@@ -107,10 +107,10 @@ impl Bm25VectorOutput {
         }
     }
 
-    pub fn from_ids(ids: &[u32]) -> Self {
+    pub fn from_ids(ids: impl Iterator<Item = u32>) -> Self {
         let mut map: BTreeMap<u32, u32> = BTreeMap::new();
         for term_id in ids {
-            *map.entry(*term_id).or_insert(0) += 1;
+            *map.entry(term_id).or_insert(0) += 1;
         }
         let mut doc_len: u32 = 0;
         let mut indexes = Vec::with_capacity(map.len());

@@ -386,7 +386,7 @@ pub fn tokenize(content: &str, tokenizer_name: &str) -> Bm25VectorOutput {
         "Tocken" => TOCKENIZER.encode(content),
         _ => custom_tokenize(content, tokenizer_name),
     };
-    Bm25VectorOutput::from_ids(&term_ids)
+    Bm25VectorOutput::from_ids(term_ids.iter().copied())
 }
 
 fn custom_tokenize(text: &str, tokenizer_name: &str) -> Vec<u32> {
