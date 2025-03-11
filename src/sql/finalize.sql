@@ -8,6 +8,9 @@ CREATE TYPE bm25vector (
     ALIGNMENT = double
 );
 
+CREATE CAST (int[] AS bm25vector)
+    WITH FUNCTION _vchord_bm25_cast_array_to_bm25vector(int[], integer, boolean) AS IMPLICIT;
+
 CREATE TYPE bm25query AS (
     index_oid regclass,
     query_vector bm25vector
