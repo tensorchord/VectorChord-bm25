@@ -173,7 +173,7 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 
 ### Data Types
 
-- `bm25vector`: A vector type for storing BM25 tokenized text.
+- `bm25vector`: A specialized vector type for storing BM25 tokenized text. Structured as a sparse vector, it stores token IDs and their corresponding frequencies. For example, `{1:2, 2:1}` indicates that token ID 1 appears twice and token ID 2 appears once in the document.
 - `bm25query`: A query type for BM25 ranking.
 
 ### Functions
@@ -184,6 +184,10 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 - `tokenize(content text, tokenizer_name text) RETURNS bm25vector`: Tokenize the content text into a BM25 vector. 
 - `to_bm25query(index_name regclass, query text, tokenizer_name text) RETURNS bm25query`: Convert the input text into a BM25 query.
 - `bm25vector <&> bm25query RETURNS float4`: Calculate the **negative** BM25 score between the BM25 vector and query.
+
+### Casts
+
+- `int[]::bm25vector (implicit)`: Cast an integer array to a BM25 vector. The integer array represents token IDs, and the cast aggregates duplicates into frequencies, ignoring token order. For example, `{1, 2, 1}` will be cast to `{1:2, 2:1}` (token ID 1 appears twice, token ID 2 appears once).
 
 ### GUCs
 
