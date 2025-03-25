@@ -6,9 +6,6 @@ CREATE UNLOGGED TABLE documents (
 );
 
 statement ok
-CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
-
-statement ok
 INSERT INTO documents (passage) VALUES 
 ('PostgreSQL is a powerful, open-source object-relational database system. It has over 15 years of active development.'),
 ('Full-text search is a technique for searching in plain-text documents or textual database fields. PostgreSQL supports this with tsvector.'),
@@ -22,7 +19,18 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT create_tokenizer('tokenizer_bert', $$
+model = "bert_base_uncased"
+$$);
+
+statement ok
+UPDATE documents SET embedding = tokenize(passage, 'tokenizer_bert');
+
+statement ok
+CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
+
+statement ok
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -31,19 +39,26 @@ statement ok
 SET enable_seqscan=off;
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
 
 statement ok
-UPDATE documents SET embedding = tokenize(passage, 'Bert');
+INSERT INTO documents (passage) VALUES 
+('vchord_bm25 is a postgresql extension for bm25 ranking algorithm.');
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+UPDATE documents SET embedding = tokenize(passage, 'tokenizer_bert') WHERE embedding IS NULL;
+
+statement ok
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
 
 statement ok
 DROP TABLE documents;
+
+statement ok
+SELECT drop_tokenizer('tokenizer_bert');

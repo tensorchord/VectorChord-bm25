@@ -22,7 +22,12 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT create_tokenizer('tokenizer_bert', $$
+model = "bert_base_uncased"
+$$);
+
+statement ok
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -31,19 +36,22 @@ statement ok
 SET enable_seqscan=off;
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
 
 statement ok
-UPDATE documents SET embedding = tokenize(passage, 'Bert');
+UPDATE documents SET embedding = tokenize(passage, 'tokenizer_bert') WHERE embedding IS NULL;
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
 
 statement ok
 DROP TABLE documents;
+
+statement ok
+SELECT drop_tokenizer('tokenizer_bert');

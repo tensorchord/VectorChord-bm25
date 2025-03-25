@@ -6,6 +6,31 @@ CREATE TABLE documents (
 );
 
 statement ok
+SELECT create_text_analyzer('text_analyzer1', $$
+pre_tokenizer = "unicode_segmentation"
+[[character_filters]]
+to_lowercase = {}
+[[character_filters]]
+unicode_normalization = "nfkd"
+[[token_filters]]
+skip_non_alphanumeric = {}
+[[token_filters]]
+stopwords = "nltk_english"
+[[token_filters]]
+stemmer = "english_porter2"
+$$);
+
+statement ok
+SELECT create_custom_model_tokenizer_and_trigger(
+    tokenizer_name => 'tokenizer1',
+    model_name => 'model1',
+    text_analyzer_name => 'text_analyzer1',
+    table_name => 'documents',
+    source_column => 'passage',
+    target_column => 'embedding'
+);
+
+statement ok
 INSERT INTO documents (passage) VALUES 
 ('PostgreSQL is a powerful, open-source object-relational database system. It has over 15 years of active development.'),
 ('Full-text search is a technique for searching in plain-text documents or textual database fields. PostgreSQL supports this with tsvector.'),
@@ -19,34 +44,29 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
-SELECT create_tokenizer('tokenizer_bert', $$
-model = "bert_base_uncased"
-$$);
-
-statement ok
-UPDATE documents SET embedding = tokenize(passage, 'tokenizer_bert');
-
-statement ok
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
+
+statement ok
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
+FROM documents
+ORDER BY rank
+LIMIT 10;
 
 statement ok
 SET enable_seqscan=off;
 
 statement ok
-SET bm25_catalog.bm25_limit = 0;
-
-query I
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
-----
 
 statement ok
-SET bm25_catalog.bm25_limit = -1;
+INSERT INTO documents (passage) VALUES 
+('vchord_bm25 is a postgresql extension for bm25 ranking algorithm.');
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -56,3 +76,9 @@ DROP TABLE documents;
 
 statement ok
 SELECT drop_tokenizer('tokenizer_bert');
+
+statement ok
+SELECT drop_text_analyzer('text_analyzer1');
+
+statement ok
+SELECT drop_custom_model('model1');

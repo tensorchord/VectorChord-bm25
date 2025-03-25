@@ -18,7 +18,7 @@ docker run \
   --name vectorchord-demo \
   -e POSTGRES_PASSWORD=mysecretpassword \
   -p 5432:5432 \
-  -d ghcr.io/tensorchord/vchord_bm25-postgres:pg17-v0.1.0
+  -d ghcr.io/tensorchord/vchord_bm25-postgres:pg17-v0.1.1
 ```
 
 Once everything’s set up, you can connect to the database using the `psql` command line tool. The default username is `postgres`, and the default password is `mysecretpassword`. Here’s how to connect:
@@ -30,13 +30,14 @@ psql -h localhost -p 5432 -U postgres
 After connecting, run the following SQL to make sure the extension is enabled:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;
+CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;  -- for tokenizer
+CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;   -- for bm25 ranking
 ```
 
-Then, don’t forget to add `bm25_catalog` to the search path:
+Then, don’t forget to add `tokenizer_catalog` and `bm25_catalog` to the search path:
 
 ```sql
-ALTER SYSTEM SET search_path TO "$user", public, bm25_catalog;
+ALTER SYSTEM SET search_path TO "$user", public, tokenizer_catalog, bm25_catalog;
 SELECT pg_reload_conf();
 ```
 
@@ -46,9 +47,15 @@ The extension is mainly composed by three parts, tokenizer, bm25vector and bm25v
 
 To tokenize a text, you can use the `tokenize` function. The `tokenize` function takes two arguments, the text to tokenize and the tokenizer name. 
 
+> Tokenizer part is completed by a separate extension [pg_tokenizer.rs](https://github.com/tensorchord/pg_tokenizer.rs), more details can be found [here](https://github.com/tensorchord/pg_tokenizer.rs/tree/main/docs).
+
 ```sql
+-- create a tokenizer
+SELECT create_tokenizer('bert', $$
+model = "bert_base_uncased"
+$$);
 -- tokenize text with bert tokenizer
-SELECT tokenize('A quick brown fox jumps over the lazy dog.', 'Bert');
+SELECT tokenize('A quick brown fox jumps over the lazy dog.', 'bert');
 -- Output: {2474:1, 2829:1, 3899:1, 4248:1, 4419:1, 5376:1, 5831:1}
 -- The output is a bm25vector, 2474:1 means the word with id 2474 appears once in the text.
 ```
@@ -79,7 +86,7 @@ INSERT INTO documents (passage) VALUES
 Then tokenize it 
 
 ```sql
-UPDATE documents SET embedding = tokenize(passage, 'Bert');
+UPDATE documents SET embedding = tokenize(passage, 'bert');
 ```
 
 Create the index on the bm25vector column so that we can collect the global document frequency.
@@ -93,25 +100,16 @@ Now we can calculate the BM25 score between the query and the vectors. Note that
 ```sql
 -- to_bm25query(index_name, query, tokenizer_name)
 -- <&> is the operator to compute the bm25 score
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'PostgreSQL', 'Bert') AS bm25_score FROM documents;
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'bert')) AS bm25_score FROM documents;
 ```
 
 And you can use the order by to utilize the index to get the most relevant documents first and faster.
 ```sql
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'PostgreSQL', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
 ```
-## Tokenizer
-
-Currently, we support the following tokenizers:
-
-- `Bert`: default uncased BERT tokenizer.
-- `Tocken`: a Unicode tokenizer pre-trained on wiki-103-raw with `min_freq=10`.
-- `Unicode`: a Unicode tokenizer that will be trained on your data.
-
-For more details, check the [tokenizer](./tokenizer.md) document.
 
 <!-- ## Performance Benchmark
 
@@ -178,11 +176,7 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 
 ### Functions
 
-- `create_tokenizer(tokenizer_name text, config text)`: Create a tokenizer with the given name and configuration.
-- `create_unicode_tokenizer_and_trigger(tokenizer_name text, table_name text, source_column text, target_column text)`: Create a Unicode tokenizer and trigger function for the given table and columns. It will automatically build the tokenizer according to source_column and store the result in target_column.
-- `drop_tokenizer(tokenizer_name text)`: Drop the tokenizer with the given name.
-- `tokenize(content text, tokenizer_name text) RETURNS bm25vector`: Tokenize the content text into a BM25 vector. 
-- `to_bm25query(index_name regclass, query text, tokenizer_name text) RETURNS bm25query`: Convert the input text into a BM25 query.
+- `to_bm25query(index_name regclass, query_vector bm25vector) RETURNS bm25query`: Convert the input text into a BM25 query.
 - `bm25vector <&> bm25query RETURNS float4`: Calculate the **negative** BM25 score between the BM25 vector and query.
 
 ### Casts
@@ -194,10 +188,6 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 - `bm25_catalog.bm25_limit (integer)`: The maximum number of documents to return in a search. Default is 100, minimum is -1, and maximum is 65535. When set to -1, it will perform brute force search and return all documents with scores greater than 0.
 - `bm25_catalog.enable_index (boolean)`: Whether to enable the bm25 index. Default is true.
 - `bm25_catalog.segment_growing_max_page_size (integer)`: The maximum page count of the growing segment. When the size of the growing segment exceeds this value, the segment will be sealed into a read-only segment. Default is 4,096, minimum is 1, and maximum is 1,000,000.
-
-## Contribution
-
-- For new tokenizer, check the [tokenizer](./tokenizer.md#contribution) document.
 
 ## License
 

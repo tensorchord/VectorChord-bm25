@@ -6,7 +6,6 @@ pub mod guc;
 pub mod index;
 pub mod page;
 pub mod segment;
-pub mod token;
 pub mod utils;
 pub mod weight;
 
