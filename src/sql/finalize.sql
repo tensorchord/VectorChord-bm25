@@ -16,9 +16,9 @@ CREATE TYPE bm25query AS (
     query_vector bm25vector
 );
 
-CREATE FUNCTION to_bm25query(index_oid regclass, query_str text, tokenizer_name text) RETURNS bm25query
-    STABLE STRICT PARALLEL SAFE LANGUAGE sql AS $$
-        SELECT index_oid, tokenize(query_str, tokenizer_name);
+CREATE FUNCTION to_bm25query(index_oid regclass, query_vector bm25vector) RETURNS bm25query
+    IMMUTABLE STRICT PARALLEL SAFE LANGUAGE sql AS $$
+        SELECT index_oid, query_vector;
     $$;
 
 CREATE ACCESS METHOD bm25 TYPE INDEX HANDLER _bm25_amhandler;

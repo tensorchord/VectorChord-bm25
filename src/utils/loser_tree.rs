@@ -28,7 +28,7 @@ where
             winners[m + i] = i;
         }
         for i in (1..m).rev() {
-            let (l, r) = (winners[i << 1], winners[i << 1 | 1]);
+            let (l, r) = (winners[i << 1], winners[(i << 1) | 1]);
             (losers[i], winners[i]) = if x[l] < x[r] { (l, r) } else { (r, l) };
         }
         losers[0] = winners[1];

@@ -1,7 +1,8 @@
 statement ok
 CREATE TABLE documents (
     id SERIAL PRIMARY KEY,
-    passage TEXT
+    passage TEXT,
+    embedding bm25vector
 );
 
 statement ok
@@ -18,16 +19,18 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
-ALTER TABLE documents ADD COLUMN embedding bm25vector;
+SELECT create_tokenizer('tokenizer_bert', $$
+model = "bert_base_uncased"
+$$);
 
 statement ok
-UPDATE documents SET embedding = tokenize(passage, 'Bert');
+UPDATE documents SET embedding = tokenize(passage, 'tokenizer_bert');
 
 statement ok
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -49,13 +52,13 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
-UPDATE documents SET embedding = tokenize(passage, 'Bert') WHERE embedding IS NULL;
+UPDATE documents SET embedding = tokenize(passage, 'tokenizer_bert') WHERE embedding IS NULL;
 
 statement ok
 VACUUM documents;
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -64,10 +67,13 @@ statement ok
 SET enable_seqscan=off;
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', 'Post', 'Bert') AS rank
+SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('Post', 'tokenizer_bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
 
 statement ok
 DROP TABLE documents;
+
+statement ok
+SELECT drop_tokenizer('tokenizer_bert');
