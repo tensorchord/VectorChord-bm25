@@ -1,0 +1,90 @@
+name: Check
+
+on:
+  pull_request:
+    paths:
+      - ".cargo"
+      - ".github/workflows/check.yml"
+      - "src/**"
+      - "tests/**"
+      - "tools/**"
+      - ".taplo.toml"
+      - ".typos.toml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "*.control"
+  push:
+    paths:
+      - ".cargo"
+      - ".github/workflows/check.yml"
+      - "src/**"
+      - "tests/**"
+      - "tools/**"
+      - ".taplo.toml"
+      - ".typos.toml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "*.control"
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  SCCACHE_GHA_ENABLED: true
+  RUSTC_WRAPPER: sccache
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  style:
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Typos
+        uses: crate-ci/typos@master
+      - name: Taplo
+        run: |
+          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-full-linux-$(uname -m).gz | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
+          taplo fmt --check
+      - name: Rustfmt
+        run: cargo fmt --check
+
+  lint:
+    strategy:
+      matrix:
+        version: ["14", "15", "16", "17"]
+        arch: ["x86_64", "aarch64"]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+
+    env:
+      POSTGRES_VERSION: ${{ matrix.version }}
+      PLATFORM: ${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Get dependencies latest version
+        run: |
+          echo "PG_TOKENIZER_VERSION=$(curl -sSL https://api.github.com/repos/tensorchord/pg_tokenizer.rs/releases/latest | jq -r '.tag_name')" >> $GITHUB_ENV
+      - name: Set up Environment
+        run: ./tools/setup.sh
+      - name: Set up Sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+      - name: Clippy
+        run: cargo clippy --features pg${{ matrix.version }}
+      - name: Unit Test
+        run: cargo test --no-fail-fast --features pg${{ matrix.version }}
+      - name: Install
+        run: cargo pgrx install --features "pg${{ matrix.version }}" --release --sudo
+      - name: Integration Test
+        run: |
+          sudo systemctl start postgresql
+          psql -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;'
+          psql -c 'CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;'
+          sqllogictest --db $USER --user $USER './tests/**/*.slt'
