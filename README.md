@@ -52,7 +52,7 @@ To tokenize a text, you can use the `tokenize` function. The `tokenize` function
 ```sql
 -- create a tokenizer
 SELECT create_tokenizer('bert', $$
-model = "bert_base_uncased"  -- using pre-tarined model
+model = "bert_base_uncased"  # using pre-tarined model
 $$);
 -- tokenize text with bert tokenizer
 SELECT tokenize('A quick brown fox jumps over the lazy dog.', 'bert');
@@ -113,6 +113,9 @@ LIMIT 10;
 
 ## More Examples
 
+<details>
+<summary>Using custom model</summary>
+
 ### Using custom model
 
 You can also build a custom model based on your own corpus easily.
@@ -170,6 +173,11 @@ ORDER BY rank
 LIMIT 10;
 ```
 
+</details>
+
+<details>
+<summary>Using jieba for Chinese text</summary>
+
 ### Using jieba for Chinese text
 
 For chinese text, you can use [`jieba`](https://github.com/messense/jieba-rs) pre-tokenizer to segment the text into words. And then train a custom model with segmented words.
@@ -218,6 +226,11 @@ FROM documents
 ORDER BY rank
 LIMIT 10;
 ```
+
+</details>
+
+<details>
+<summary>Using lindera for Japanese text</summary>
 
 ### Using lindera for Japanese text
 
@@ -331,6 +344,47 @@ FROM documents
 ORDER BY rank
 LIMIT 10;
 ```
+
+</details>
+
+## Tokenizer
+
+Tokenizer configuration is a critical aspect of effective text processing, significantly impacting the performance and accuracy. Here are some key considerations and options to help you choose the right tokenizer for your use case.
+
+## Tokenizer Options
+
+Tokenizers can be configured in two primary ways:
+
+- Pre-Trained Models: Suitable for most standard use cases, these models are efficient and require minimal setup. They are ideal for general-purpose applications where the text aligns with the model's training data.
+- Custom Models: Offer flexibility and superior accuracy for specialized texts. These models are trained on specific corpora, making them suitable for domains with unique terminology, such as technical fields or industry-specific jargon.
+
+Usage Details can be found in [pg_tokenizer doc](https://github.com/tensorchord/pg_tokenizer.rs/blob/main/docs/04-usage.md)
+
+### Key Considerations
+
+1. Language and Script:
+- Space-Separated Languages (e.g., English, Spanish, German): Simple tokenizers such as `bert` (for English) or `unicode` tokenizers are effective here.
+- Non-Space-Separated Languages (e.g., Chinese, Japanese): These require specialized algorithms (pre-tokenizer) that understand language structure beyond simple spaces. You can refer [chinese](#using-jieba-for-chinese-text) and [japanase](#using-lindera-for-japanese-text) example.
+- Multilingual Data: Handling multiple languages within a single index requires tokenizers designed for multilingual support, such as `gemma2b` or `llmlingua2`, which efficiently manage diverse scripts and languages.
+
+2. Vocabulary Complexity:
+- Standard Language: For texts with common vocabulary, pre-trained models are sufficient. They handle everyday language efficiently without requiring extensive customization.
+- Specialized Texts: Technical terms, abbreviations (e.g., "k8s" for Kubernetes), or compound nouns may need custom models. Custom models can be trained to recognize domain-specific terms, ensuring accurate tokenization. Custom synonyms may also be necessary for precise results. See [custom model](#using-custom-model) example.
+
+### Preload (for performance)
+
+For each connection, Postgresql will load the model at the first time you use it. This may cause a delay for the first query. You can use the `add_preload_model` function to preload the model at the server startup.
+
+```sh
+psql -c "SELECT add_preload_model('model1')"
+# restart the PostgreSQL to take effects
+sudo docker restart container_name         # for pg_tokenizer running with docker
+sudo systemctl restart postgresql.service  # for pg_tokenizer running with systemd
+```
+
+The default preload model is `llmlingua2`. You can change it by using `add_preload_model`, `remove_preload_model` functions.
+
+> Note: The pre-trained model may take a lot of memory (100MB for gemma2b, 200MB for llmlingua2). If you have a lot of models, you should consider the memory usage when you preload the model.
 
 <!-- ## Performance Benchmark
 
