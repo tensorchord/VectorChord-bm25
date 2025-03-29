@@ -52,7 +52,7 @@ To tokenize a text, you can use the `tokenize` function. The `tokenize` function
 ```sql
 -- create a tokenizer
 SELECT create_tokenizer('bert', $$
-model = "bert_base_uncased"  # using pre-tarined model
+model = "bert_base_uncased"  # using pre-trained model
 $$);
 -- tokenize text with bert tokenizer
 SELECT tokenize('A quick brown fox jumps over the lazy dog.', 'bert');
@@ -363,13 +363,13 @@ Usage Details can be found in [pg_tokenizer doc](https://github.com/tensorchord/
 ### Key Considerations
 
 1. Language and Script:
-- Space-Separated Languages (e.g., English, Spanish, German): Simple tokenizers such as `bert` (for English) or `unicode` tokenizers are effective here.
-- Non-Space-Separated Languages (e.g., Chinese, Japanese): These require specialized algorithms (pre-tokenizer) that understand language structure beyond simple spaces. You can refer [chinese](#using-jieba-for-chinese-text) and [japanase](#using-lindera-for-japanese-text) example.
-- Multilingual Data: Handling multiple languages within a single index requires tokenizers designed for multilingual support, such as `gemma2b` or `llmlingua2`, which efficiently manage diverse scripts and languages.
+- **Space-Separated Languages** (e.g., English, Spanish, German): Simple tokenizers such as `bert` (for English) or `unicode` tokenizers are effective here.
+- **Non-Space-Separated Languages** (e.g., Chinese, Japanese): These require specialized algorithms (pre-tokenizer) that understand language structure beyond simple spaces. You can refer [Chinese](#using-jieba-for-chinese-text) and [Japanese](#using-lindera-for-japanese-text) example.
+- **Multilingual Data**: Handling multiple languages within a single index requires tokenizers designed for multilingual support, such as `gemma2b` or `llmlingua2`, which efficiently manage diverse scripts and languages.
 
 2. Vocabulary Complexity:
-- Standard Language: For texts with common vocabulary, pre-trained models are sufficient. They handle everyday language efficiently without requiring extensive customization.
-- Specialized Texts: Technical terms, abbreviations (e.g., "k8s" for Kubernetes), or compound nouns may need custom models. Custom models can be trained to recognize domain-specific terms, ensuring accurate tokenization. Custom synonyms may also be necessary for precise results. See [custom model](#using-custom-model) example.
+- **Standard Language**: For texts with common vocabulary, pre-trained models are sufficient. They handle everyday language efficiently without requiring extensive customization.
+- **Specialized Texts**: Technical terms, abbreviations (e.g., "k8s" for Kubernetes), or compound nouns may need custom models. Custom models can be trained to recognize domain-specific terms, ensuring accurate tokenization. Custom synonyms may also be necessary for precise results. See [custom model](#using-custom-model) example.
 
 ### Preload (for performance)
 
