@@ -55,7 +55,24 @@ jobs:
       - name: Rustfmt
         run: cargo fmt --check
 
+  get-dependencies-version:
+    runs-on: ubuntu-latest
+    outputs:
+      PG_TOKENIZER_VERSION: ${{ steps.get-dependencies-version.outputs.PG_TOKENIZER_VERSION }}
+    steps:
+      - name: Get dependencies latest version
+        id: get-dependencies-version
+        run: |
+          PG_TOKENIZER_VERSION=$(curl -sSL https://api.github.com/repos/tensorchord/pg_tokenizer.rs/releases/latest | jq -r '.tag_name')
+          if [ "$PG_TOKENIZER_VERSION" == "null" ]; then
+            echo "Failed to get PG_TOKENIZER_VERSION"
+            exit 1
+          else
+            echo "PG_TOKENIZER_VERSION=$PG_TOKENIZER_VERSION" >> $GITHUB_OUTPUT
+          fi
+
   lint:
+    needs: ["get-dependencies-version"]
     strategy:
       matrix:
         version: ["14", "15", "16", "17"]
@@ -65,13 +82,11 @@ jobs:
     env:
       POSTGRES_VERSION: ${{ matrix.version }}
       PLATFORM: ${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}
+      PG_TOKENIZER_VERSION: ${{ needs.get-dependencies-version.outputs.PG_TOKENIZER_VERSION }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Get dependencies latest version
-        run: |
-          echo "PG_TOKENIZER_VERSION=$(curl -sSL https://api.github.com/repos/tensorchord/pg_tokenizer.rs/releases/latest | jq -r '.tag_name')" >> $GITHUB_ENV
       - name: Set up Environment
         run: ./tools/setup.sh
       - name: Set up Sccache
