@@ -18,7 +18,7 @@ docker run \
   --name vectorchord-demo \
   -e POSTGRES_PASSWORD=mysecretpassword \
   -p 5432:5432 \
-  -d ghcr.io/tensorchord/vchord_bm25-postgres:pg17-v0.1.1
+  -d ghcr.io/tensorchord/vchord_bm25-postgres:pg17-v0.2.0
 ```
 
 Once everything’s set up, you can connect to the database using the `psql` command line tool. The default username is `postgres`, and the default password is `mysecretpassword`. Here’s how to connect:
@@ -55,9 +55,9 @@ SELECT create_tokenizer('bert', $$
 model = "bert_base_uncased"  # using pre-trained model
 $$);
 -- tokenize text with bert tokenizer
-SELECT tokenize('A quick brown fox jumps over the lazy dog.', 'bert');
--- Output: {2474:1, 2829:1, 3899:1, 4248:1, 4419:1, 5376:1, 5831:1}
--- The output is a bm25vector, 2474:1 means the word with id 2474 appears once in the text.
+SELECT tokenize('A quick brown fox jumps over the lazy dog.', 'bert')::bm25vector;
+-- Output: {1012:1, 1037:1, 1996:1, 2058:1, 2829:1, 3899:1, 4248:1, 4419:1, 13971:1, 14523:1}
+-- The output is a bm25vector, 1012:1 means the word with id 1012 appears once in the text.
 ```
 
 One thing special about bm25 score is that it depends on a global document frequency, which means the score of a word in a document depends on the frequency of the word in all documents. To calculate the bm25 score between a bm25vector and a query, you need had a document set first and then use the `<&>` operator.
