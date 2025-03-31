@@ -69,19 +69,6 @@ AS 'MODULE_PATHNAME', '_bm25catalog_bm25vector_send_wrapper';
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/datatype/cast.rs:3
--- vchord_bm25::datatype::cast::_vchord_bm25_cast_array_to_bm25vector
-CREATE  FUNCTION "_vchord_bm25_cast_array_to_bm25vector"(
-	"array" INT[], /* pgrx::datum::array::Array<i32> */
-	"_typmod" INT, /* i32 */
-	"_explicit" bool /* bool */
-) RETURNS bm25vector /* vchord_bm25::datatype::memory_bm25vector::Bm25VectorOutput */
-IMMUTABLE STRICT PARALLEL SAFE
-LANGUAGE c /* Rust */
-AS 'MODULE_PATHNAME', '_vchord_bm25_cast_array_to_bm25vector_wrapper';
-/* </end connected objects> */
-
-/* <begin connected objects> */
 -- src/datatype/functions.rs:11
 -- vchord_bm25::datatype::functions::search_bm25query
 CREATE  FUNCTION "search_bm25query"(
@@ -94,7 +81,7 @@ AS 'MODULE_PATHNAME', 'search_bm25query_wrapper';
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/token.rs:95
+-- src/token.rs:81
 -- vchord_bm25::token::unicode_tokenizer_split
 CREATE  FUNCTION "unicode_tokenizer_split"(
 	"text" TEXT, /* &str */
@@ -106,7 +93,7 @@ AS 'MODULE_PATHNAME', 'unicode_tokenizer_split_wrapper';
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/token.rs:197
+-- src/token.rs:169
 -- requires:
 --   unicode_tokenizer_split
 
@@ -155,7 +142,7 @@ $body$ LANGUAGE plpgsql;
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/token.rs:203
+-- src/token.rs:175
 -- vchord_bm25::token::create_tokenizer
 -- requires:
 --   tokenizer_table
@@ -169,7 +156,7 @@ AS 'MODULE_PATHNAME', 'create_tokenizer_wrapper';
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/token.rs:382
+-- src/token.rs:369
 -- vchord_bm25::token::tokenize
 -- requires:
 --   tokenizer_table
@@ -183,7 +170,7 @@ AS 'MODULE_PATHNAME', 'tokenize_wrapper';
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/token.rs:226
+-- src/token.rs:205
 -- vchord_bm25::token::drop_tokenizer
 -- requires:
 --   tokenizer_table
@@ -196,7 +183,7 @@ AS 'MODULE_PATHNAME', 'drop_tokenizer_wrapper';
 /* </end connected objects> */
 
 /* <begin connected objects> */
--- src/token.rs:417
+-- src/token.rs:406
 -- vchord_bm25::token::unicode_tokenizer_set_target_column_trigger
 CREATE FUNCTION "unicode_tokenizer_set_target_column_trigger"()
 	RETURNS TRIGGER
@@ -216,9 +203,6 @@ CREATE TYPE bm25vector (
     INTERNALLENGTH = VARIABLE,
     ALIGNMENT = double
 );
-
-CREATE CAST (int[] AS bm25vector)
-    WITH FUNCTION _vchord_bm25_cast_array_to_bm25vector(int[], integer, boolean) AS IMPLICIT;
 
 CREATE TYPE bm25query AS (
     index_oid regclass,
