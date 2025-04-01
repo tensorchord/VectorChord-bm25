@@ -90,7 +90,7 @@ jobs:
       - name: Set up Environment
         run: ./tools/setup.sh
       - name: Set up Sccache
-        uses: mozilla-actions/sccache-action@v0.0.7
+        uses: mozilla-actions/sccache-action@v0.0.8
       - name: Clippy
         run: cargo clippy --features pg${{ matrix.version }}
       - name: Unit Test
