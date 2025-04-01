@@ -3,11 +3,14 @@ use pgrx::{itemptr::item_pointer_to_u64, FromDatum};
 
 use crate::{
     datatype::Bm25VectorInput,
-    page::{page_free, page_read, page_write, VirtualPageWriter, METAPAGE_BLKNO},
+    page::{
+        page_free, page_get_item, page_get_item_id, page_get_max_offset_number, page_read,
+        page_write, VirtualPageWriter, METAPAGE_BLKNO,
+    },
     segment::{
         delete::extend_delete_bit,
         field_norm::fieldnorm_to_id,
-        growing::{GrowingSegmentData, GrowingSegmentReader},
+        growing::{GrowingSegmentData, GrowingSegmentReader, SealingTask},
         meta::MetaPageData,
         posting::{InvertedAppender, InvertedWriter},
         sealed::extend_sealed_term_id,
@@ -68,9 +71,9 @@ pub unsafe extern "C" fn aminsert(
             .unwrap_or(0);
         extend_term_id(index, meta, term_id_cnt);
 
-        let term_info_reader = TermStatReader::new(index, meta);
+        let term_stat_reader = TermStatReader::new(index, meta);
         for term_id in vector_borrow.indexes().iter() {
-            term_info_reader.update(*term_id, |tf| {
+            term_stat_reader.update(*term_id, |tf| {
                 *tf += 1;
             });
         }
@@ -82,7 +85,7 @@ pub unsafe extern "C" fn aminsert(
     let sealed_doc_id = meta.sealed_doc_id;
     drop(metapage);
 
-    if let Some(block_count) = growing_results {
+    if let Some(SealingTask { page_count }) = growing_results {
         let growing_reader = GrowingSegmentReader::new(index, &prev_growing_segment);
         let mut doc_id = sealed_doc_id;
 
@@ -96,9 +99,7 @@ pub unsafe extern "C" fn aminsert(
         }
 
         let mut writer = InvertedWriter::new();
-        let mut iter = growing_reader
-            .into_lending_iter()
-            .take(block_count as usize);
+        let mut iter = growing_reader.into_lending_iter(page_count as usize);
         while let Some(vector) = iter.next() {
             writer.insert(doc_id, vector);
             doc_id += 1;
@@ -115,7 +116,7 @@ pub unsafe extern "C" fn aminsert(
         meta.sealed_doc_id = doc_id;
         let growing_segment = meta.growing_segment.as_mut().unwrap();
         growing_segment.first_blkno = prev_growing_segment.last_blkno.try_into().unwrap();
-        growing_segment.growing_full_page_count -= block_count;
+        growing_segment.growing_full_page_count -= page_count;
         drop(metapage);
 
         pgrx::pg_sys::UnlockPage(index, METAPAGE_BLKNO, pgrx::pg_sys::ExclusiveLock as _);
@@ -130,6 +131,27 @@ fn free_growing_segment(index: pgrx::pg_sys::Relation, segment: GrowingSegmentDa
     let mut blkno = segment.first_blkno.get();
     for _ in 0..segment.growing_full_page_count {
         assert!(blkno != pgrx::pg_sys::InvalidBlockNumber);
+
+        let next_blkno;
+        {
+            let page = page_read(index, blkno);
+            let count = page_get_max_offset_number(&page);
+            for i in 1..=count {
+                let item_id = page_get_item_id(&page, i);
+                if item_id.lp_flags() == pgrx::pg_sys::LP_REDIRECT {
+                    let first_blkno: &u32 = page_get_item(&page, item_id);
+                    free_page_list(index, *first_blkno);
+                }
+            }
+            next_blkno = page.opaque.next_blkno;
+        }
+        page_free(index, blkno);
+        blkno = next_blkno;
+    }
+}
+
+fn free_page_list(index: pgrx::pg_sys::Relation, mut blkno: pgrx::pg_sys::BlockNumber) {
+    while blkno != pgrx::pg_sys::InvalidBlockNumber {
         let next_blkno = page_read(index, blkno).opaque.next_blkno;
         page_free(index, blkno);
         blkno = next_blkno;

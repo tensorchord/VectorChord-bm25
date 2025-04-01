@@ -1,0 +1,43 @@
+statement ok
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    embedding bm25vector
+);
+
+statement ok
+CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
+
+statement ok
+INSERT INTO documents (embedding) SELECT
+    ARRAY(SELECT i::int FROM generate_series(1, 10000) AS i)::bm25vector;
+
+statement ok
+SET enable_seqscan=off;
+
+query I
+SELECT id
+FROM documents
+ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', '{1:1}')
+LIMIT 10;
+----
+1
+
+statement ok
+SET bm25_catalog.segment_growing_max_page_size = 1;
+
+statement ok
+INSERT INTO documents (embedding) SELECT
+    ARRAY(SELECT i::int FROM generate_series(1, 1000) AS i)::bm25vector;
+
+statement ok
+INSERT INTO documents (embedding) SELECT
+    ARRAY(SELECT i::int FROM generate_series(1, 1000) AS i)::bm25vector;
+
+statement ok
+SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', '{1:1}') AS rank
+FROM documents
+ORDER BY rank
+LIMIT 10;
+
+statement ok
+DROP TABLE documents;

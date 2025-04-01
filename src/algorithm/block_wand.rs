@@ -45,7 +45,7 @@ impl SealedScorer {
             }
             done!()
         });
-        g.into_iter()
+        g
     }
 }
 
