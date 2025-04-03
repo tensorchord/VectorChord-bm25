@@ -94,9 +94,12 @@ jobs:
       - name: Clippy
         run: cargo clippy --features "pg${{ matrix.version }} pg_test"
       - name: Test
-        env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: 'sudo -E'
-        run: cargo pgrx test --features pg${{ matrix.version }}
+        run: |
+          getfacl -R /usr/share/postgresql > permissions.txt
+          sudo chmod -R 777 /usr/share/postgresql
+          cargo pgrx test --features pg${{ matrix.version }}
+          sudo setfacl --restore=permissions.txt
+          rm permissions.txt
       - name: Install
         run: cargo pgrx install --features "pg${{ matrix.version }}" --release --sudo
       - name: SqlLogicTest
