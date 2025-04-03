@@ -93,11 +93,11 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.8
       - name: Clippy
         run: cargo clippy --features "pg${{ matrix.version }} pg_test"
-      - name: Unit Test
-        run: cargo pgrx test --features pg${{ matrix.version }}
+      - name: Test
+        run: sudo -E cargo pgrx test --features pg${{ matrix.version }}
       - name: Install
         run: cargo pgrx install --features "pg${{ matrix.version }}" --release --sudo
-      - name: Integration Test
+      - name: SqlLogicTest
         run: |
           sudo systemctl start postgresql
           psql -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;'
