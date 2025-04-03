@@ -56,14 +56,13 @@ impl InvertedWrite for InvertedAppender {
             return;
         };
 
-        let doc_cnt = recorder.doc_cnt();
         if recorder.doc_cnt() == 0 {
             self.term_id += 1;
             return;
         }
 
         let term_doc_cnt = self.term_stat_reader.read(self.term_id);
-        let idf = idf(self.doc_cnt, doc_cnt + term_doc_cnt);
+        let idf = idf(self.doc_cnt, term_doc_cnt);
         let weight = Bm25Weight::new(1, idf, self.avgdl);
 
         let term_info = self.term_info_reader.read(self.term_id);
@@ -71,6 +70,7 @@ impl InvertedWrite for InvertedAppender {
             let mut serializer = PostingSerializer::new(self.index);
             serializer.new_term();
 
+            let mut block_count = 0;
             let mut blockwand_tf = 0;
             let mut blockwand_fieldnorm_id = 0;
             let mut blockwand_score = 0.0;
@@ -91,6 +91,7 @@ impl InvertedWrite for InvertedAppender {
                     blockwand_tf = 0;
                     blockwand_fieldnorm_id = 0;
                     blockwand_score = 0.0;
+                    block_count += 1;
                 }
             }
 
@@ -105,6 +106,10 @@ impl InvertedWrite for InvertedAppender {
             term_meta.unfulled_docid[..unfulled_doc_cnt].copy_from_slice(unflushed_docids);
             term_meta.unfulled_freq[..unfulled_doc_cnt].copy_from_slice(unflushed_term_freqs);
             term_meta.unfulled_doc_cnt = unfulled_doc_cnt as u32;
+            if unfulled_doc_cnt != 0 {
+                block_count += 1;
+            }
+            term_meta.block_count = block_count;
 
             let (skip_info_blkno, skip_info_last_blkno, block_data_blkno) =
                 serializer.close_term(&weight, &self.fieldnorm_reader);

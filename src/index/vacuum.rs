@@ -94,7 +94,7 @@ pub unsafe extern "C" fn amvacuumcleanup(
     if let Some(growing) = meta.growing_segment.as_ref() {
         let reader = GrowingSegmentReader::new(index, growing);
         let mut doc_id = meta.sealed_doc_id;
-        let mut iter = reader.into_lending_iter();
+        let mut iter = reader.into_lending_iter(usize::MAX);
         while let Some(vector) = iter.next() {
             if !delete_bitmap_reader.is_delete(doc_id) {
                 for &idx in vector.indexes() {

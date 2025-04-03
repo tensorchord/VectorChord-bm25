@@ -26,6 +26,7 @@ bitflags::bitflags! {
         const BLOCK_DATA = 1 << 7;
         const GROWING = 1 << 8;
         const DELETE = 1 << 9;
+        const GROWING_REDIRECT = 1 << 10;
         const FREE = 1 << 15;
     }
 }
@@ -82,6 +83,10 @@ impl PageData {
         let pd_lower = self.header.pd_lower as usize;
         let lower_offset = pd_lower - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>();
         &mut self.content[lower_offset..]
+    }
+
+    pub fn as_pg_page(&self) -> pgrx::pg_sys::Page {
+        self as *const _ as pgrx::pg_sys::Page
     }
 }
 
@@ -427,9 +432,26 @@ pub fn page_get_item_id(
     }
 }
 
+pub fn page_set_item_id_flag(
+    page: &mut PageData,
+    offset_number: pgrx::pg_sys::OffsetNumber,
+    flag: ItemIdFlags,
+) {
+    let item_id = unsafe {
+        &mut *page
+            .header
+            .pd_linp
+            .as_mut_ptr()
+            .add(offset_number as usize - 1)
+    };
+    item_id.set_lp_flags(flag.bits() as _);
+}
+
 pub fn page_get_item<T>(page: &PageData, item_id: pgrx::pg_sys::ItemIdData) -> &T {
     unsafe {
         let offset = item_id.lp_off();
+        let size = item_id.lp_len() as usize;
+        assert!(std::mem::size_of::<T>() <= size);
         let ptr = (page as *const PageData)
             .cast::<u8>()
             .add(offset as usize)
@@ -439,7 +461,21 @@ pub fn page_get_item<T>(page: &PageData, item_id: pgrx::pg_sys::ItemIdData) -> &
     }
 }
 
-pub fn page_append_item(page: &mut PageData, item: &[u8]) -> bool {
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct ItemIdFlags: u8 {
+        const LP_UNUSED = 0;
+        const LP_NORMAL = 1;
+        const LP_REDIRECT = 2;  // reuse LP_REDIRECT to store items which exceed page size
+        const LP_DEAD = 3;
+    }
+}
+
+pub fn page_append_item(page: &mut PageData, item: &[u8], redirect: bool) -> bool {
+    if item.len() > bm25_page_size() {
+        return false;
+    }
+
     let offset_number = unsafe {
         pgrx::pg_sys::PageAddItemExtended(
             page as *mut _ as _,
@@ -449,5 +485,9 @@ pub fn page_append_item(page: &mut PageData, item: &[u8]) -> bool {
             0,
         )
     };
-    offset_number != pgrx::pg_sys::InvalidOffsetNumber
+    let success = offset_number != pgrx::pg_sys::InvalidOffsetNumber;
+    if success && redirect {
+        page_set_item_id_flag(page, offset_number, ItemIdFlags::LP_REDIRECT);
+    }
+    success
 }
