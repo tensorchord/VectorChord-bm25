@@ -50,6 +50,7 @@ impl BlockEncodeTrait for DeltaBitpackEncode {
     }
 }
 
+#[derive(Debug)]
 pub struct DeltaBitpackDecode {
     inner: Box<DeltaBitpackDecodeInner>,
 }
@@ -84,6 +85,7 @@ impl BlockDecodeTrait for DeltaBitpackDecode {
     }
 }
 
+#[derive(Debug)]
 pub struct DeltaBitpackDecodeInner {
     docids: [u32; BLOCK_SIZE],
     freqs: [u32; BLOCK_SIZE],

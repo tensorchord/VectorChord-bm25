@@ -7,6 +7,7 @@ const DIRECT_COUNT: usize = bm25_page_size() / 4;
 const INDIRECT1_COUNT: usize = DIRECT_COUNT * DIRECT_COUNT;
 const INDIRECT2_COUNT: usize = INDIRECT1_COUNT * DIRECT_COUNT;
 
+#[derive(Debug)]
 pub struct VirtualPageReader {
     relation: pgrx::pg_sys::Relation,
     direct_inode: Box<[u32]>,

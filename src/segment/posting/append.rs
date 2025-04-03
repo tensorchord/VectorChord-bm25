@@ -131,7 +131,7 @@ impl InvertedWrite for InvertedAppender {
                 VirtualPageWriter::open(self.index, term_meta.block_data_blkno, false);
             let mut skip_info_guard = page_write(self.index, term_meta.skip_info_last_blkno);
 
-            let mut block_count = term_meta.block_count - 1;
+            let mut block_count = term_meta.block_count;
             let mut unfulled_doc_cnt = term_meta.unfulled_doc_cnt;
             let mut last_full_block_last_docid = term_meta.last_full_block_last_docid;
             let mut blockwand_tf = 0;
@@ -148,6 +148,7 @@ impl InvertedWrite for InvertedAppender {
                 blockwand_score =
                     weight.score(id_to_fieldnorm(blockwand_fieldnorm_id), blockwand_tf);
                 skip_info_guard.header.pd_lower -= std::mem::size_of::<SkipBlock>() as u16;
+                block_count -= 1;
             }
 
             for (docid, freq) in recorder.iter() {
