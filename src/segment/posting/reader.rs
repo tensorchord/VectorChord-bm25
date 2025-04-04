@@ -47,6 +47,7 @@ impl PostingTermInfoReader {
     }
 }
 
+#[derive(Debug)]
 pub struct PostingCursor {
     index: pgrx::pg_sys::Relation,
     block_decode: BlockDecode,
@@ -102,7 +103,7 @@ impl PostingCursor {
     }
 
     pub fn next_block(&mut self) -> bool {
-        debug_assert!(!self.completed());
+        debug_assert!(!self.completed(), "next_block() called on completed cursor");
         self.remain_block_cnt -= 1;
         self.block_decoded = false;
         if self.completed() {
@@ -204,7 +205,10 @@ impl PostingCursor {
     }
 
     pub fn decode_block(&mut self) {
-        debug_assert!(!self.completed());
+        debug_assert!(
+            !self.completed(),
+            "decode_block() called on completed cursor"
+        );
         if self.block_decoded {
             return;
         }
@@ -237,7 +241,7 @@ impl PostingCursor {
     }
 
     pub fn freq(&self) -> u32 {
-        debug_assert!(!self.completed());
+        debug_assert!(!self.completed(), "freq() called on completed cursor");
         debug_assert!(self.block_decoded);
         if self.is_in_unfulled_block() {
             return self.unfulled_freq[self.unfulled_offset as usize];

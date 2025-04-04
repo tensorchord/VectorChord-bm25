@@ -92,12 +92,22 @@ jobs:
       - name: Set up Sccache
         uses: mozilla-actions/sccache-action@v0.0.8
       - name: Clippy
-        run: cargo clippy --features pg${{ matrix.version }}
-      - name: Unit Test
-        run: cargo test --no-fail-fast --features pg${{ matrix.version }}
+        run: cargo clippy --features "pg${{ matrix.version }} pg_test"
+      - name: Test
+        run: |
+          export tmp_file=$(mktemp)
+          getfacl -R /usr/share/postgresql > $tmp_file
+          getfacl -R /usr/lib/postgresql >> $tmp_file
+          sudo chmod -R 777 /usr/share/postgresql
+          sudo chmod -R 777 /usr/lib/postgresql
+
+          cargo pgrx test --features pg${{ matrix.version }}
+
+          cd /
+          sudo setfacl --restore=$tmp_file
       - name: Install
         run: cargo pgrx install --features "pg${{ matrix.version }}" --release --sudo
-      - name: Integration Test
+      - name: SqlLogicTest
         run: |
           sudo systemctl start postgresql
           psql -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;'
