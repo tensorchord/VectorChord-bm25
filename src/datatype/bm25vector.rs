@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bm25VectorBorrowed<'a> {
     doc_len: u32,
     indexes: &'a [u32],

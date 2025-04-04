@@ -1,0 +1,39 @@
+query B
+SELECT '{}'::bm25vector = '{}'::bm25vector;
+----
+t
+
+query B
+SELECT '{1:1, 2:1}'::bm25vector = '{1:1, 2:1}'::bm25vector;
+----
+t
+
+query B
+SELECT '{1:1, 2:2}'::bm25vector = '{1:1, 2:2}'::bm25vector;
+----
+t
+
+query B
+SELECT '{1:1, 2:1}'::bm25vector = '{1:1, 2:2}'::bm25vector;
+----
+f
+
+query B
+SELECT '{1:1, 2:1, 3:1}'::bm25vector = '{1:1, 2:2}'::bm25vector;
+----
+f
+
+query B
+SELECT '{}'::bm25vector = '{1:1}'::bm25vector;
+----
+f
+
+query B
+SELECT '{1:1, 2:1}'::bm25vector <> '{1:1, 2:2}'::bm25vector;
+----
+t
+
+query B
+SELECT '{1:1, 2:1}'::bm25vector <> '{1:1, 2:1}'::bm25vector;
+----
+f

@@ -8,6 +8,26 @@ CREATE TYPE bm25vector (
     ALIGNMENT = double
 );
 
+CREATE OPERATOR = (
+    PROCEDURE = _bm25catalog_bm25vector_operator_eq,
+    LEFTARG = bm25vector,
+    RIGHTARG = bm25vector,
+    COMMUTATOR = =,
+    NEGATOR = <>,
+    RESTRICT = eqsel,
+    JOIN = eqjoinsel
+);
+
+CREATE OPERATOR <> (
+    PROCEDURE = _bm25catalog_bm25vector_operator_neq,
+    LEFTARG = bm25vector,
+    RIGHTARG = bm25vector,
+    COMMUTATOR = <>,
+    NEGATOR = =,
+    RESTRICT = eqsel,
+    JOIN = eqjoinsel
+);
+
 CREATE CAST (int[] AS bm25vector)
     WITH FUNCTION _vchord_bm25_cast_array_to_bm25vector(int[], integer, boolean) AS IMPLICIT;
 
