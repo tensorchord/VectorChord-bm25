@@ -4,6 +4,7 @@ mod bytea;
 mod cast;
 mod functions;
 mod memory_bm25vector;
+mod operator_bm25vector;
 mod text_bm25vector;
 
 pub use bm25vector::Bm25VectorBorrowed;

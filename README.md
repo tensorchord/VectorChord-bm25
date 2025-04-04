@@ -452,7 +452,12 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 ### Functions
 
 - `to_bm25query(index_name regclass, query_vector bm25vector) RETURNS bm25query`: Convert the input text into a BM25 query.
-- `bm25vector <&> bm25query RETURNS float4`: Calculate the **negative** BM25 score between the BM25 vector and query.
+
+### Operators
+
+- `bm25vector = bm25vector RETURNS boolean`: Check if two BM25 vectors are equal.
+- `bm25vector <> bm25vector RETURNS boolean`: Check if two BM25 vectors are not equal.
+- `bm25vector <&> bm25query RETURNS float4`: Calculate the **negative** BM25 score between the BM25 vector and query. The lower the score, the more relevant the document is. (This is intentionally designed to be negative for easier sorting.)
 
 ### Casts
 
