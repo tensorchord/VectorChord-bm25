@@ -12,7 +12,7 @@ cargo pgrx schema --features pg$VERSION --out ./target/schema.sql
 rm -rf ./build
 
 mkdir -p ./build/zip
-[[ -d ./sql/upgrade ]] && cp -a ./sql/upgrade/. ./build/zip/
+cp -a ./sql/*.sql ./build/zip/
 cp ./target/schema.sql ./build/zip/vchord_bm25--$SEMVER.sql
 sed -e "s/@CARGO_VERSION@/$SEMVER/g" < ./vchord_bm25.control > ./build/zip/vchord_bm25.control
 cp ./target/release/libvchord_bm25.so ./build/zip/vchord_bm25.so
