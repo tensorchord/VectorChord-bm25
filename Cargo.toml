@@ -21,7 +21,6 @@ pg_test = ["dep:rand"]
 
 [dependencies]
 arrayvec = "0.7.6"
-bincode = "=1.3.3" # pin it to keep the same serialization format
 bitflags = "2.9.0"
 bitpacking = { version = "0.9", default-features = false, features = [
     "bitpacker4x",
@@ -30,24 +29,10 @@ bytemuck = "1.18"
 generator = "0.8.4"
 lending-iterator = "0.1.7"
 pgrx = "=0.13.1"
-regex = "1.11.1"
-rust-stemmers = { git = "https://github.com/tensorchord/rust-stemmers.git" }
 serde = { version = "1.0.217", features = ["derive"] }
-tantivy-stemmers = { version = "0.4.0", features = [
-    "default",
-    "english_porter",
-] }
 thiserror = "2"
-tocken = "0.1.0"
-tokenizers = { version = "0.21.0", default-features = false, features = [
-    "onig",
-] }
-toml = "0.8.19"
-unicode-normalization = "0.1.24"
-unicode-segmentation = "1.12.0"
-validator = { version = "0.20.0", features = ["derive"] }
 
-# test dependencies
+# used for `pg_test` and `test`
 rand = { version = "0.9", optional = true }
 
 [dev-dependencies]
