@@ -11,17 +11,20 @@
 VectorChord-BM25 is a PostgreSQL extension for bm25 ranking algorithm. We implemented the Block-WeakAnd Algorithms for BM25 ranking inside PostgreSQL. It's recommended to be used with [pg_tokenizer.rs](https://github.com/tensorchord/pg_tokenizer.rs) for customized tokenization.
 
 ## Getting Started
-For new users, we recommend using the Docker image to get started quickly.
+For new users, we recommend using `tensorchord/vchord-suite` image to get started quickly, you can find more details in the [VectorChord-images](https://github.com/tensorchord/VectorChord-images) repository.
 
 ```sh
-docker run \
-  --name vectorchord-demo \
-  -e POSTGRES_PASSWORD=mysecretpassword \
+docker run   \           
+  --name vchord-suite  \
+  -e POSTGRES_PASSWORD=postgres  \
   -p 5432:5432 \
-  -d ghcr.io/tensorchord/vchord_bm25-postgres:pg17-v0.2.0
+  -d tensorchord/vchord-suite:pg17-latest
+  # If you want to use ghcr image, you can change the image to `ghcr.io/tensorchord/vchord-suite:pg17-latest`.
+  # if you want to use the specific version, you can use the tag `pg17-20250414`, supported version can be found in the support matrix.
+
 ```
 
-Once everything’s set up, you can connect to the database using the `psql` command line tool. The default username is `postgres`, and the default password is `mysecretpassword`. Here’s how to connect:
+Once everything’s set up, you can connect to the database using the `psql` command line tool. The default username is `postgres`, and the default password is `postgres`. Here’s how to connect:
 
 ```sh
 psql -h localhost -p 5432 -U postgres
@@ -32,13 +35,6 @@ After connecting, run the following SQL to make sure the extension is enabled:
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;  -- for tokenizer
 CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;   -- for bm25 ranking
-```
-
-Then, don’t forget to add `tokenizer_catalog` and `bm25_catalog` to the search path:
-
-```sql
-ALTER SYSTEM SET search_path TO "$user", public, tokenizer_catalog, bm25_catalog;
-SELECT pg_reload_conf();
 ```
 
 ## Usage
