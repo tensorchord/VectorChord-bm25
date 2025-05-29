@@ -42,14 +42,14 @@ fn _bm25_amhandler(
 }
 
 #[pgrx::pg_guard]
-pub extern "C" fn amvalidate(_opclass_oid: pgrx::pg_sys::Oid) -> bool {
+pub extern "C-unwind" fn amvalidate(_opclass_oid: pgrx::pg_sys::Oid) -> bool {
     // TODO: Implement validation
     true
 }
 
 #[allow(clippy::too_many_arguments)]
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn amcostestimate(
+pub unsafe extern "C-unwind" fn amcostestimate(
     _root: *mut pgrx::pg_sys::PlannerInfo,
     path: *mut pgrx::pg_sys::IndexPath,
     _loop_count: f64,
@@ -76,7 +76,7 @@ pub unsafe extern "C" fn amcostestimate(
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn ampropety(
+pub unsafe extern "C-unwind" fn ampropety(
     _index_oid: pgrx::pg_sys::Oid,
     attno: i32,
     prop: pgrx::pg_sys::IndexAMProperty::Type,

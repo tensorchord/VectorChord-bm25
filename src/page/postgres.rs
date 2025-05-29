@@ -294,7 +294,7 @@ pub fn page_alloc(
     }
 }
 
-#[cfg(any(feature = "pg14", feature = "pg15"))]
+#[cfg(any(feature = "pg13", feature = "pg14", feature = "pg15"))]
 pub fn page_alloc(
     relation: pgrx::pg_sys::Relation,
     flag: PageFlags,
@@ -361,7 +361,7 @@ pub fn page_alloc_init_forknum(
     }
 }
 
-#[cfg(any(feature = "pg14", feature = "pg15"))]
+#[cfg(any(feature = "pg13", feature = "pg14", feature = "pg15"))]
 pub fn page_alloc_init_forknum(
     relation: pgrx::pg_sys::Relation,
     flag: PageFlags,

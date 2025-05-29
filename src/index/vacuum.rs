@@ -14,7 +14,7 @@ use crate::{
 };
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn ambulkdelete(
+pub unsafe extern "C-unwind" fn ambulkdelete(
     info: *mut pgrx::pg_sys::IndexVacuumInfo,
     stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
     callback: pgrx::pg_sys::IndexBulkDeleteCallback,
@@ -66,7 +66,7 @@ pub unsafe extern "C" fn ambulkdelete(
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn amvacuumcleanup(
+pub unsafe extern "C-unwind" fn amvacuumcleanup(
     info: *mut pgrx::pg_sys::IndexVacuumInfo,
     stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
 ) -> *mut pgrx::pg_sys::IndexBulkDeleteResult {

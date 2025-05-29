@@ -14,7 +14,7 @@ use crate::{
 };
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn ambuildempty(index: pgrx::pg_sys::Relation) {
+pub extern "C-unwind" fn ambuildempty(index: pgrx::pg_sys::Relation) {
     let mut meta_page = page_alloc_init_forknum(index, PageFlags::META);
     assert_eq!(meta_page.blkno(), METAPAGE_BLKNO);
     let field_norm_blkno = VirtualPageWriter::init_fork(index, PageFlags::FIELD_NORM);
@@ -54,7 +54,7 @@ struct BuildState {
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn ambuild(
+pub extern "C-unwind" fn ambuild(
     heap: pgrx::pg_sys::Relation,
     index: pgrx::pg_sys::Relation,
     index_info: *mut pgrx::pg_sys::IndexInfo,
@@ -72,7 +72,9 @@ pub unsafe extern "C" fn ambuild(
         memctx: PgMemoryContexts::new("vchord_bm25_index_build"),
     };
 
-    pgrx::pg_sys::IndexBuildHeapScan(heap, index, index_info, Some(build_callback), &mut state);
+    unsafe {
+        pgrx::pg_sys::IndexBuildHeapScan(heap, index, index_info, Some(build_callback), &mut state);
+    }
     state.builder.finalize_insert();
     write_down(&state);
 
@@ -84,7 +86,7 @@ pub unsafe extern "C" fn ambuild(
 }
 
 #[pgrx::pg_guard]
-unsafe extern "C" fn build_callback(
+pub extern "C-unwind" fn build_callback(
     _index: pgrx::pg_sys::Relation,
     ctid: pgrx::pg_sys::ItemPointer,
     datum: *mut pgrx::pg_sys::Datum,
@@ -92,22 +94,23 @@ unsafe extern "C" fn build_callback(
     _tuple_is_alive: bool,
     state: *mut std::os::raw::c_void,
 ) {
-    let state = &mut *(state.cast::<BuildState>());
-    state.memctx.reset();
-    state.memctx.switch_to(|_| {
-        let Some(vector) = Bm25VectorInput::from_datum(*datum, *is_null) else {
-            return;
-        };
-        let id = item_pointer_to_u64(unsafe { ctid.read() });
-        state.builder.insert(id, vector.borrow());
-        state.index_tuples += 1;
-    });
-    state.memctx.reset();
-
-    state.heap_tuples += 1;
+    unsafe {
+        let state = &mut *(state.cast::<BuildState>());
+        state.memctx.reset();
+        state.memctx.switch_to(|_| {
+            let Some(vector) = Bm25VectorInput::from_datum(*datum, *is_null) else {
+                return;
+            };
+            let id = item_pointer_to_u64(ctid.read());
+            state.builder.insert(id, vector.borrow());
+            state.index_tuples += 1;
+        });
+        state.memctx.reset();
+        state.heap_tuples += 1;
+    }
 }
 
-unsafe fn write_down(state: &BuildState) {
+fn write_down(state: &BuildState) {
     let doc_cnt = state.builder.doc_cnt();
     let doc_term_cnt = state.builder.doc_term_cnt();
     let term_id_cnt = state.builder.term_id_cnt();
