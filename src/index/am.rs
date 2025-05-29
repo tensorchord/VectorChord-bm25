@@ -31,7 +31,7 @@ fn _bm25_amhandler(
     amroutine.amvacuumcleanup = Some(amvacuumcleanup);
     amroutine.amcostestimate = Some(amcostestimate);
     amroutine.amoptions = Some(amoptions);
-    amroutine.amproperty = Some(ampropety);
+    amroutine.amproperty = Some(amproperty);
     amroutine.amvalidate = Some(amvalidate);
     amroutine.ambeginscan = Some(ambeginscan);
     amroutine.amrescan = Some(amrescan);
@@ -76,7 +76,7 @@ pub unsafe extern "C-unwind" fn amcostestimate(
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C-unwind" fn ampropety(
+pub unsafe extern "C-unwind" fn amproperty(
     _index_oid: pgrx::pg_sys::Oid,
     attno: i32,
     prop: pgrx::pg_sys::IndexAMProperty::Type,
