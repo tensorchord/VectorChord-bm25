@@ -26,7 +26,7 @@ curl -fsSL https://github.com/tensorchord/pg_tokenizer.rs/releases/download/${PG
 sudo apt install -y ./pg_tokenizer.deb
 rm pg_tokenizer.deb
 
-curl -fsSL https://github.com/tensorchord/pgrx/releases/download/v0.13.1/cargo-pgrx-v0.13.1-$(uname -m)-unknown-linux-gnu.tar.gz | tar -xOzf - ./cargo-pgrx | install -m 755 /dev/stdin /usr/local/bin/cargo-pgrx
+curl -fsSL https://github.com/tensorchord/pgrx/releases/download/v0.14.1/cargo-pgrx-v0.14.1-$(uname -m)-unknown-linux-gnu.tar.gz | tar -xOzf - ./cargo-pgrx | install -m 755 /dev/stdin /usr/local/bin/cargo-pgrx
 cargo pgrx init --pg${POSTGRES_VERSION}=$(which pg_config)
 
 curl -fsSL https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.26.4/sqllogictest-bin-v0.26.4-$(uname -m)-unknown-linux-musl.tar.gz | tar -xOzf - ./sqllogictest | install -m 755 /dev/stdin /usr/local/bin/sqllogictest
