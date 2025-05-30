@@ -29,7 +29,7 @@ impl Reloption {
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn amoptions(
+pub extern "C-unwind" fn amoptions(
     reloptions: pgrx::pg_sys::Datum,
     validate: bool,
 ) -> *mut pgrx::pg_sys::bytea {

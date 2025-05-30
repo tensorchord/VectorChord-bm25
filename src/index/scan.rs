@@ -29,7 +29,7 @@ enum Scanner {
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn ambeginscan(
+pub unsafe extern "C-unwind" fn ambeginscan(
     index: pgrx::pg_sys::Relation,
     n_keys: std::os::raw::c_int,
     n_orderbys: std::os::raw::c_int,
@@ -46,7 +46,7 @@ pub unsafe extern "C" fn ambeginscan(
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn amrescan(
+pub unsafe extern "C-unwind" fn amrescan(
     scan: pgrx::pg_sys::IndexScanDesc,
     _keys: pgrx::pg_sys::ScanKey,
     _n_keys: std::os::raw::c_int,
@@ -76,7 +76,7 @@ pub unsafe extern "C" fn amrescan(
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn amgettuple(
+pub extern "C-unwind" fn amgettuple(
     scan: pgrx::pg_sys::IndexScanDesc,
     direction: pgrx::pg_sys::ScanDirection::Type,
 ) -> bool {
@@ -102,9 +102,11 @@ pub unsafe extern "C" fn amgettuple(
     };
 
     if let Some(tid) = results.pop() {
-        pgrx::itemptr::u64_to_item_pointer(tid, &mut (*scan).xs_heaptid);
-        (*scan).xs_recheckorderby = false;
-        (*scan).xs_recheck = false;
+        unsafe {
+            pgrx::itemptr::u64_to_item_pointer(tid, &mut (*scan).xs_heaptid);
+            (*scan).xs_recheckorderby = false;
+            (*scan).xs_recheck = false;
+        }
         true
     } else {
         false
@@ -112,7 +114,7 @@ pub unsafe extern "C" fn amgettuple(
 }
 
 #[pgrx::pg_guard]
-pub unsafe extern "C" fn amendscan(scan: pgrx::pg_sys::IndexScanDesc) {
+pub extern "C-unwind" fn amendscan(scan: pgrx::pg_sys::IndexScanDesc) {
     let scanner = unsafe { (*scan).opaque.cast::<Scanner>().as_mut().unwrap() };
     *scanner = Scanner::Initial;
 }
