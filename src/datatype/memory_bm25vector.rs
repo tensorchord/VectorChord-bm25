@@ -44,7 +44,7 @@ impl Bm25VectorHeader {
             std::slice::from_raw_parts(ptr, len)
         }
     }
-    pub fn borrow(&self) -> Bm25VectorBorrowed {
+    pub fn borrow(&self) -> Bm25VectorBorrowed<'_> {
         unsafe { Bm25VectorBorrowed::new_unchecked(self.doc_len, self.indexes(), self.values()) }
     }
     pub fn to_bytes(&self) -> &[u8] {

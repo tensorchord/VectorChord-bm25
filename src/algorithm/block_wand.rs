@@ -54,6 +54,7 @@ pub fn block_wand_single(
     fieldnorm_reader: &FieldNormReader,
     delete_bitmap_reader: &DeleteBitmapReader,
     computer: &mut TopKComputer,
+    filter: impl Fn(u32) -> bool,
 ) {
     'outer: loop {
         while scorer.posting.block_max_score(&scorer.weight) <= computer.threshold() {
@@ -64,7 +65,8 @@ pub fn block_wand_single(
         scorer.posting.decode_block();
         loop {
             let docid = scorer.posting.docid();
-            if !delete_bitmap_reader.is_delete(docid) {
+            let valid = filter(docid) && !delete_bitmap_reader.is_delete(docid);
+            if valid {
                 let tf = scorer.posting.freq();
                 let fieldnorm_id = fieldnorm_reader.read(docid);
                 let fieldnorm = id_to_fieldnorm(fieldnorm_id);
@@ -86,6 +88,7 @@ pub fn block_wand(
     fieldnorm_reader: &FieldNormReader,
     delete_bitmap_reader: &DeleteBitmapReader,
     computer: &mut TopKComputer,
+    filter: impl Fn(u32) -> bool,
 ) {
     for s in &mut scorers {
         s.posting.decode_block();
@@ -120,7 +123,9 @@ pub fn block_wand(
             continue;
         }
 
-        if !delete_bitmap_reader.is_delete(pivot_doc) {
+        let valid = filter(pivot_doc) && !delete_bitmap_reader.is_delete(pivot_doc);
+
+        if valid {
             let len = id_to_fieldnorm(fieldnorm_reader.read(pivot_doc));
             let score = indexes[..pivot_len]
                 .iter()

@@ -19,7 +19,7 @@ impl FieldNormWriter {
         pager.finalize()
     }
 
-    pub fn to_memory_reader(&self) -> FieldNormMemoryReader {
+    pub fn to_memory_reader(&self) -> FieldNormMemoryReader<'_> {
         FieldNormMemoryReader(&self.buffer)
     }
 }

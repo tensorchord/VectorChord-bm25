@@ -3,6 +3,7 @@ use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 pub static BM25_LIMIT: GucSetting<i32> = GucSetting::<i32>::new(100);
 pub static ENABLE_INDEX: GucSetting<bool> = GucSetting::<bool>::new(true);
 pub static SEGMENT_GROWING_MAX_PAGE_SIZE: GucSetting<i32> = GucSetting::<i32>::new(4096);
+pub static ENABLE_PREFILTER: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 pub fn init() {
     GucRegistry::define_int_guc(
@@ -30,6 +31,14 @@ pub fn init() {
         &SEGMENT_GROWING_MAX_PAGE_SIZE,
         1,
         1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        "bm25_catalog.enable_prefilter",
+        "Whether to enable the prefilter",
+        "Whether to enable the prefilter for bm25 queries. If enabled, the prefilter will be used to filter out documents that do not match the query before scoring.",
+        &ENABLE_PREFILTER,
         GucContext::Userset,
         GucFlags::default(),
     );
