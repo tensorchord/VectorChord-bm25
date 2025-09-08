@@ -151,10 +151,10 @@ fn _bm25catalog_bm25vector_out(vector: Bm25VectorInput<'_>) -> CString {
     for (&index, &value) in vector.indexes().iter().zip(vector.values().iter()) {
         match need_splitter {
             false => {
-                write!(buffer, "{}:{}", index, value).unwrap();
+                write!(buffer, "{index}:{value}").unwrap();
                 need_splitter = true;
             }
-            true => write!(buffer, ", {}:{}", index, value).unwrap(),
+            true => write!(buffer, ", {index}:{value}").unwrap(),
         }
     }
     buffer.push('}');
