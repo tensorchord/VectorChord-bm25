@@ -41,5 +41,5 @@ pub fn search_bm25query(
         query_vector,
     );
 
-    scores * -1.0
+    -scores
 }

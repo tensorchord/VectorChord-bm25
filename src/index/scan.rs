@@ -6,7 +6,7 @@ use pgrx::{prelude::PgHeapTuple, FromDatum};
 use crate::{
     algorithm::block_wand::{block_wand, block_wand_single, SealedScorer},
     datatype::{Bm25VectorBorrowed, Bm25VectorOutput},
-    guc::BM25_LIMIT,
+    guc::{BM25_LIMIT, ENABLE_PREFILTER},
     page::{page_read, METAPAGE_BLKNO},
     segment::{
         delete::DeleteBitmapReader, field_norm::FieldNormReader, growing::GrowingSegmentReader,
@@ -17,15 +17,38 @@ use crate::{
     weight::{bm25_score_batch, idf, Bm25Weight},
 };
 
-enum Scanner {
-    Initial,
+pub enum Scanner {
+    Initial {
+        node: *mut pgrx::pg_sys::IndexScanState,
+    },
     Waiting {
+        node: *mut pgrx::pg_sys::IndexScanState,
         query_index: pgrx::PgRelation,
         query_vector: Bm25VectorOutput,
     },
     Scanned {
+        node: *mut pgrx::pg_sys::IndexScanState,
         results: Vec<u64>,
     },
+}
+
+impl Scanner {
+    fn node(&self) -> *mut pgrx::pg_sys::IndexScanState {
+        match self {
+            Scanner::Initial { node } => *node,
+            Scanner::Waiting { node, .. } => *node,
+            Scanner::Scanned { node, .. } => *node,
+        }
+    }
+
+    pub fn set_node(&mut self, node: *mut pgrx::pg_sys::IndexScanState) {
+        let n = match self {
+            Scanner::Initial { node: n } => n,
+            Scanner::Waiting { node: n, .. } => n,
+            Scanner::Scanned { node: n, .. } => n,
+        };
+        *n = node;
+    }
 }
 
 #[pgrx::pg_guard]
@@ -40,7 +63,9 @@ pub unsafe extern "C-unwind" fn ambeginscan(
     assert!(n_orderbys == 1, "it only supports one ORDER BY clause");
     let scan = pgrx::pg_sys::RelationGetIndexScan(index, n_keys, n_orderbys);
     (*scan).opaque = CurrentMemoryContext
-        .leak_and_drop_on_delete(Scanner::Initial)
+        .leak_and_drop_on_delete(Scanner::Initial {
+            node: std::ptr::null_mut(),
+        })
         .cast();
     scan
 }
@@ -70,6 +95,7 @@ pub unsafe extern "C-unwind" fn amrescan(
 
     let scanner = (*scan).opaque.cast::<Scanner>().as_mut().unwrap();
     *scanner = Scanner::Waiting {
+        node: scanner.node(),
         query_index: pgrx::PgRelation::with_lock(index_oid, pgrx::pg_sys::AccessShareLock as _),
         query_vector,
     };
@@ -86,19 +112,23 @@ pub extern "C-unwind" fn amgettuple(
 
     let scanner = unsafe { (*scan).opaque.cast::<Scanner>().as_mut().unwrap() };
     let results = match scanner {
-        Scanner::Initial => return false,
+        Scanner::Initial { .. } => return false,
         Scanner::Waiting {
+            node,
             query_index,
             query_vector,
         } => {
-            let results = scan_main(query_index.as_ptr(), query_vector.borrow());
-            *scanner = Scanner::Scanned { results };
-            let Scanner::Scanned { results } = scanner else {
+            let results = scan_main(*node, query_index.as_ptr(), query_vector.borrow());
+            *scanner = Scanner::Scanned {
+                node: *node,
+                results,
+            };
+            let Scanner::Scanned { results, .. } = scanner else {
                 unreachable!()
             };
             results
         }
-        Scanner::Scanned { results } => results,
+        Scanner::Scanned { results, .. } => results,
     };
 
     if let Some(tid) = results.pop() {
@@ -116,11 +146,16 @@ pub extern "C-unwind" fn amgettuple(
 #[pgrx::pg_guard]
 pub extern "C-unwind" fn amendscan(scan: pgrx::pg_sys::IndexScanDesc) {
     let scanner = unsafe { (*scan).opaque.cast::<Scanner>().as_mut().unwrap() };
-    *scanner = Scanner::Initial;
+    let node = scanner.node();
+    *scanner = Scanner::Initial { node };
 }
 
 // return top-k results
-fn scan_main(index: pgrx::pg_sys::Relation, query_vector: Bm25VectorBorrowed) -> Vec<u64> {
+fn scan_main(
+    scan_state: *mut pgrx::pg_sys::IndexScanState,
+    index: pgrx::pg_sys::Relation,
+    query_vector: Bm25VectorBorrowed,
+) -> Vec<u64> {
     let limit = BM25_LIMIT.get();
     if limit == 0 {
         return Vec::new();
@@ -171,23 +206,53 @@ fn scan_main(index: pgrx::pg_sys::Relation, query_vector: Bm25VectorBorrowed) ->
         })
         .collect::<Vec<_>>();
 
-    if scorers.len() == 1 {
-        block_wand_single(
-            scorers.into_iter().next().unwrap(),
-            &fieldnorm_reader,
-            &delete_bitmap_reader,
-            &mut computer,
-        );
+    let payload_reader = PayloadReader::new(index, meta.payload_blkno);
+
+    if ENABLE_PREFILTER.get() {
+        let f = |doc_id| {
+            let value = payload_reader.read(doc_id);
+            let mut tid = pgrx::pg_sys::ItemPointerData::default();
+            pgrx::itemptr::u64_to_item_pointer(value, &mut tid);
+            unsafe { check(scan_state, &mut tid) }
+        };
+        if scorers.len() == 1 {
+            block_wand_single(
+                scorers.into_iter().next().unwrap(),
+                &fieldnorm_reader,
+                &delete_bitmap_reader,
+                &mut computer,
+                f,
+            );
+        } else {
+            block_wand(
+                scorers,
+                &fieldnorm_reader,
+                &delete_bitmap_reader,
+                &mut computer,
+                f,
+            );
+        }
     } else {
-        block_wand(
-            scorers,
-            &fieldnorm_reader,
-            &delete_bitmap_reader,
-            &mut computer,
-        );
+        let f = |_| true;
+        if scorers.len() == 1 {
+            block_wand_single(
+                scorers.into_iter().next().unwrap(),
+                &fieldnorm_reader,
+                &delete_bitmap_reader,
+                &mut computer,
+                f,
+            );
+        } else {
+            block_wand(
+                scorers,
+                &fieldnorm_reader,
+                &delete_bitmap_reader,
+                &mut computer,
+                f,
+            );
+        }
     }
 
-    let payload_reader = PayloadReader::new(index, meta.payload_blkno);
     computer
         .to_sorted_slice()
         .iter()
@@ -283,4 +348,86 @@ fn brute_force_scan(index: pgrx::pg_sys::Relation, query_vector: Bm25VectorBorro
         .into_iter()
         .map(|(_, doc_id)| payload_reader.read(doc_id))
         .collect()
+}
+
+unsafe fn execute_boolean_qual(
+    state: *mut pgrx::pg_sys::ExprState,
+    econtext: *mut pgrx::pg_sys::ExprContext,
+) -> bool {
+    use pgrx::PgMemoryContexts;
+    if state.is_null() {
+        return true;
+    }
+    assert!((*state).flags & pgrx::pg_sys::EEO_FLAG_IS_QUAL as u8 != 0);
+    let mut is_null = true;
+    pgrx::pg_sys::MemoryContextReset((*econtext).ecxt_per_tuple_memory);
+    let ret = PgMemoryContexts::For((*econtext).ecxt_per_tuple_memory)
+        .switch_to(|_| (*state).evalfunc.unwrap()(state, econtext, &mut is_null));
+    assert!(!is_null);
+    bool::from_datum(ret, is_null).unwrap()
+}
+
+unsafe fn check_quals(node: *mut pgrx::pg_sys::IndexScanState) -> bool {
+    let slot = (*node).ss.ss_ScanTupleSlot;
+    let econtext = (*node).ss.ps.ps_ExprContext;
+    (*econtext).ecxt_scantuple = slot;
+    if (*node).ss.ps.qual.is_null() {
+        return true;
+    }
+    let state = (*node).ss.ps.qual;
+    let econtext = (*node).ss.ps.ps_ExprContext;
+    execute_boolean_qual(state, econtext)
+}
+
+unsafe fn check_mvcc(
+    node: *mut pgrx::pg_sys::IndexScanState,
+    p: pgrx::pg_sys::ItemPointer,
+) -> bool {
+    let scan_desc = (*node).iss_ScanDesc;
+    let heap_fetch = (*scan_desc).xs_heapfetch;
+    let index_relation = (*heap_fetch).rel;
+    let rd_tableam = (*index_relation).rd_tableam;
+    let snapshot = (*scan_desc).xs_snapshot;
+    let index_fetch_tuple = (*rd_tableam).index_fetch_tuple.unwrap();
+    let mut all_dead = false;
+    let slot = (*node).ss.ss_ScanTupleSlot;
+    let mut heap_continue = false;
+    let found = index_fetch_tuple(
+        heap_fetch,
+        p,
+        snapshot,
+        slot,
+        &mut heap_continue,
+        &mut all_dead,
+    );
+    if found {
+        return true;
+    }
+    while heap_continue {
+        let found = index_fetch_tuple(
+            heap_fetch,
+            p,
+            snapshot,
+            slot,
+            &mut heap_continue,
+            &mut all_dead,
+        );
+        if found {
+            return true;
+        }
+    }
+    false
+}
+
+unsafe fn check(node: *mut pgrx::pg_sys::IndexScanState, p: pgrx::pg_sys::ItemPointer) -> bool {
+    if node.is_null() {
+        return true;
+    }
+    if !check_mvcc(node, p) {
+        return false;
+    }
+    if !check_quals(node) {
+        return false;
+    }
+    true
 }
