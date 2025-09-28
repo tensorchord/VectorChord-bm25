@@ -46,7 +46,10 @@ pub unsafe extern "C-unwind" fn ambulkdelete(
 
     for i in 0..meta.current_doc_id {
         if i % bm25_page_size() as u32 == 0 {
+            #[cfg(not(feature = "pg18"))]
             pgrx::pg_sys::vacuum_delay_point();
+            #[cfg(feature = "pg18")]
+            pgrx::pg_sys::vacuum_delay_point(false);
         }
         if delete_bitmap_reader.is_delete(i) {
             continue;
