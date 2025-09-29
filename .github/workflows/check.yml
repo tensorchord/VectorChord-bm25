@@ -75,7 +75,7 @@ jobs:
     needs: ["get-dependencies-version"]
     strategy:
       matrix:
-        version: ["14", "15", "16", "17"]
+        version: ["14", "15", "16", "17", "18"]
         arch: ["x86_64", "aarch64"]
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
 

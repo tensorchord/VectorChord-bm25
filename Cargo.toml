@@ -16,6 +16,7 @@ pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
 pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
 pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
 pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
 pg_test = ["dep:rand"]
 
 [dependencies]
@@ -27,7 +28,7 @@ bitpacking = { version = "0.9", default-features = false, features = [
 bytemuck = "1.18"
 generator = "0.8.4"
 lending-iterator = "0.1.7"
-pgrx = "=0.14.1"
+pgrx = "=0.16.1"
 serde = { version = "1.0.217", features = ["derive"] }
 thiserror = "2"
 
@@ -35,7 +36,7 @@ thiserror = "2"
 rand = { version = "0.9", optional = true }
 
 [dev-dependencies]
-pgrx-tests = "=0.14.1"
+pgrx-tests = "=0.16.1"
 
 [profile.release]
 lto = "fat"
@@ -48,6 +49,7 @@ lto = "thin"
 codegen-units = 8
 
 [lints.clippy]
+manual_is_multiple_of = "allow"
 missing_safety_doc = "allow"
 new_without_default = "allow"
 not_unsafe_ptr_arg_deref = "allow"

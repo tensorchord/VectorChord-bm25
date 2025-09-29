@@ -15,6 +15,8 @@ impl Reloption {
         optname: c"options".as_ptr(),
         opttype: pgrx::pg_sys::relopt_type::RELOPT_TYPE_STRING,
         offset: std::mem::offset_of!(Reloption, options) as i32,
+        #[cfg(feature = "pg18")]
+        isset_offset: 0,
     }];
 
     #[allow(unused)]

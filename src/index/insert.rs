@@ -33,7 +33,13 @@ pub extern "C-unwind" fn aminsert(
     unsafe { aminsertinner(index, values, is_null, heap_tid) }
 }
 
-#[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16", feature = "pg17"))]
+#[cfg(any(
+    feature = "pg14",
+    feature = "pg15",
+    feature = "pg16",
+    feature = "pg17",
+    feature = "pg18"
+))]
 #[allow(clippy::too_many_arguments)]
 #[pgrx::pg_guard]
 pub extern "C-unwind" fn aminsert(

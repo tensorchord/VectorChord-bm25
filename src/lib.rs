@@ -24,7 +24,8 @@ compile_error!("Target is not supported.");
     feature = "pg14",
     feature = "pg15",
     feature = "pg16",
-    feature = "pg17"
+    feature = "pg17",
+    feature = "pg18"
 )))]
 compiler_error!("PostgreSQL version must be selected.");
 
