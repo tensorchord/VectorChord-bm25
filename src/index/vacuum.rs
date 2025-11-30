@@ -1,7 +1,7 @@
 use lending_iterator::LendingIterator;
 
 use crate::{
-    page::{bm25_page_size, page_read, page_write, METAPAGE_BLKNO},
+    page::{page_read, page_write, BM25_PAGE_SIZE, METAPAGE_BLKNO},
     segment::{
         delete::DeleteBitmapReader,
         field_norm::{FieldNormRead, FieldNormReader},
@@ -45,7 +45,7 @@ pub unsafe extern "C-unwind" fn ambulkdelete(
     let mut delete_bitmap_reader = DeleteBitmapReader::new(index, meta.delete_bitmap_blkno);
 
     for i in 0..meta.current_doc_id {
-        if i % bm25_page_size() as u32 == 0 {
+        if i % BM25_PAGE_SIZE as u32 == 0 {
             #[cfg(not(feature = "pg18"))]
             pgrx::pg_sys::vacuum_delay_point();
             #[cfg(feature = "pg18")]

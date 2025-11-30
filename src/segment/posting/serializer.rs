@@ -23,7 +23,7 @@ pub struct InvertedSerializer<R: FieldNormRead> {
     index: pgrx::pg_sys::Relation,
     postings_serializer: PostingSerializer,
     term_info_serializer: PostingTermInfoSerializer,
-    block_parttion: BlockPartition,
+    block_partition: BlockPartition,
     // block wand helper
     avgdl: f32,
     corpus_doc_cnt: u32,
@@ -43,7 +43,7 @@ impl<R: FieldNormRead> InvertedSerializer<R> {
             index,
             postings_serializer,
             term_info_serializer,
-            block_parttion: BlockPartition::new(),
+            block_partition: BlockPartition::new(),
             avgdl,
             corpus_doc_cnt,
             fieldnorm_reader,
@@ -73,11 +73,11 @@ impl<R: FieldNormRead> InvertedWrite for InvertedSerializer<R> {
         let bm25_weight = Bm25Weight::new(1, idf, self.avgdl);
         for (doc_id, tf) in recorder.iter() {
             let len = id_to_fieldnorm(self.fieldnorm_reader.read(doc_id));
-            self.block_parttion.add_doc(bm25_weight.score(len, tf));
+            self.block_partition.add_doc(bm25_weight.score(len, tf));
         }
-        self.block_parttion.make_partitions();
-        let partitions = self.block_parttion.partitions();
-        let max_doc = self.block_parttion.max_doc();
+        self.block_partition.make_partitions();
+        let partitions = self.block_partition.partitions();
+        let max_doc = self.block_partition.max_doc();
         let mut block_count = 0;
         let mut blockwand_tf = 0;
         let mut blockwand_fieldnorm_id = 0;
@@ -96,7 +96,7 @@ impl<R: FieldNormRead> InvertedWrite for InvertedSerializer<R> {
             }
         }
         assert!(block_count == partitions.len());
-        self.block_parttion.reset();
+        self.block_partition.reset();
 
         let mut term_meta_guard = page_alloc(self.index, PageFlags::TERM_META, true);
         let term_meta_page = &mut *term_meta_guard;

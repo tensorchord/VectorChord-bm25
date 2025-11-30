@@ -6,9 +6,9 @@ use crate::{
     datatype::{Bm25VectorBorrowed, Bm25VectorHeader, Bm25VectorInput},
     guc::SEGMENT_GROWING_MAX_PAGE_SIZE,
     page::{
-        bm25_page_size, page_alloc_with_fsm, page_append_item, page_get_item, page_get_item_id,
+        page_alloc_with_fsm, page_append_item, page_get_item, page_get_item_id,
         page_get_max_offset_number, page_read, page_write, PageFlags, PageReadGuard, PageReader,
-        PageWriter,
+        PageWriter, BM25_PAGE_SIZE,
     },
 };
 
@@ -120,7 +120,7 @@ pub fn growing_segment_insert(
     buf.extend_from_slice(bm25vector.to_bytes());
     let mut redirect = false;
 
-    if buf.len() > bm25_page_size() - std::mem::size_of::<pgrx::pg_sys::ItemIdData>() {
+    if buf.len() > BM25_PAGE_SIZE - std::mem::size_of::<pgrx::pg_sys::ItemIdData>() {
         let mut writer = PageWriter::new(index, PageFlags::GROWING_REDIRECT, false);
         writer.write(&buf);
         let first_blkno = writer.finalize();

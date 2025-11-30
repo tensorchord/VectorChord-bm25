@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use crate::{
     algorithm::block_encode::{BlockDecode, BlockDecodeTrait},
-    page::{bm25_page_size, page_read, VirtualPageReader},
+    page::{page_read, VirtualPageReader, BM25_PAGE_SIZE},
     segment::{field_norm::id_to_fieldnorm, sealed::SealedSegmentData},
     weight::Bm25Weight,
 };
@@ -114,7 +114,7 @@ impl PostingCursor {
         self.page_offset += self.cur_skip_info.size as u32;
 
         self.skip_info_offset += std::mem::size_of::<SkipBlock>() as u32;
-        if self.skip_info_offset == bm25_page_size() as u32 {
+        if self.skip_info_offset == BM25_PAGE_SIZE as u32 {
             let page = page_read(self.index, self.skip_info_page_id);
             self.skip_info_page_id = page.opaque.next_blkno;
             self.skip_info_offset = 0;
