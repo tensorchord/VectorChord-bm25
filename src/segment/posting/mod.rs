@@ -3,8 +3,6 @@ mod reader;
 mod serializer;
 mod writer;
 
-use std::num::NonZero;
-
 use bytemuck::{Pod, Zeroable};
 
 pub use append::InvertedAppender;
@@ -37,16 +35,16 @@ pub struct PostingTermMetaData {
     pub skip_info_last_blkno: pgrx::pg_sys::BlockNumber,
     pub block_data_blkno: pgrx::pg_sys::BlockNumber,
     pub block_count: u32,
-    pub last_full_block_last_docid: Option<NonZero<u32>>,
-    pub unfulled_doc_cnt: u32,
+    pub last_full_block_last_docid: u32,
     pub unfulled_docid: [u32; 128],
     pub unfulled_freq: [u32; 128],
+    pub unfulled_skip_block: Option<SkipBlock>,
 }
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct SkipBlockFlags: u8 {
-        const UNFULLED = 1 << 0;
+        const UNFULLED = 1 << 0;  // deprecated
         const PAGE_CHANGED = 1 << 1;
     }
 }

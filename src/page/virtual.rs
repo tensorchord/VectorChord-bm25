@@ -228,6 +228,10 @@ impl VirtualPageWriter {
         self.first_blkno
     }
 
+    pub fn first_blkno(&self) -> u32 {
+        self.first_blkno
+    }
+
     pub fn write(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let mut space = self.freespace_mut();

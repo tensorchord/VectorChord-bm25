@@ -23,7 +23,7 @@ impl SealedScorer {
         delete_bitmap_reader: &'a DeleteBitmapReader,
     ) -> impl Iterator<Item = (f32, u32)> + 'a {
         let mut scorer = self;
-        let g = generator::Gn::new_scoped_local(move |mut s| {
+        generator::Gn::new_scoped_local(move |mut s| {
             loop {
                 scorer.posting.decode_block();
                 loop {
@@ -44,8 +44,7 @@ impl SealedScorer {
                 }
             }
             done!()
-        });
-        g
+        })
     }
 }
 

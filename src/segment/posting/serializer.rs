@@ -85,12 +85,12 @@ impl<R: FieldNormRead> InvertedWrite for InvertedSerializer<R> {
         self.postings_serializer.new_term();
         for (i, (doc_id, freq)) in recorder.iter().enumerate() {
             self.postings_serializer.write_doc(doc_id, freq);
-            if Some(i as u32) == partitions.get(block_count).copied() {
+            if partitions.get(block_count).copied() == Some(i as u32) {
                 self.postings_serializer
                     .flush_block(blockwand_tf, blockwand_fieldnorm_id);
                 block_count += 1;
             }
-            if Some(i as u32) == max_doc.get(block_count).copied() {
+            if max_doc.get(block_count).copied() == Some(i as u32) {
                 blockwand_tf = freq;
                 blockwand_fieldnorm_id = self.fieldnorm_reader.read(doc_id);
             }
@@ -108,20 +108,13 @@ impl<R: FieldNormRead> InvertedWrite for InvertedSerializer<R> {
         assert!(unfulled_doc_cnt < 128);
         term_meta.unfulled_docid[..unfulled_doc_cnt].copy_from_slice(unflushed_docids);
         term_meta.unfulled_freq[..unfulled_doc_cnt].copy_from_slice(unflushed_term_freqs);
-        term_meta.unfulled_doc_cnt = unfulled_doc_cnt as u32;
         if unfulled_doc_cnt != 0 {
             block_count += 1;
         }
 
-        term_meta.last_full_block_last_docid =
-            NonZeroU32::new(self.postings_serializer.prev_block_last_doc_id());
-        let (skip_info_blkno, skip_info_last_blkno, block_data_blkno) = self
-            .postings_serializer
-            .close_term(&bm25_weight, &self.fieldnorm_reader);
+        self.postings_serializer
+            .close_term(&bm25_weight, &self.fieldnorm_reader, term_meta);
         term_meta.block_count = block_count.try_into().unwrap();
-        term_meta.skip_info_blkno = skip_info_blkno;
-        term_meta.skip_info_last_blkno = skip_info_last_blkno;
-        term_meta.block_data_blkno = block_data_blkno;
 
         self.term_info_serializer.push(PostingTermInfo {
             meta_blkno: term_meta_guard.blkno(),
@@ -181,13 +174,12 @@ impl PostingSerializer {
     }
 
     pub fn new_term(&mut self) {
-        self.skip_info_writer = Some(PageWriter::new(self.index, PageFlags::SKIP_INFO, true));
-        self.block_data_writer = Some(VirtualPageWriter::new(
-            self.index,
-            PageFlags::BLOCK_DATA,
-            true,
-        ));
-        self.prev_block_last_doc_id = 0;
+        if self.skip_info_writer.is_some()
+            || self.block_data_writer.is_some()
+            || self.prev_block_last_doc_id != 0
+        {
+            panic!("Writers are already initialized for the previous term. Call close_term() before starting a new term.");
+        }
     }
 
     pub fn write_doc(&mut self, doc_id: u32, freq: u32) {
@@ -200,7 +192,8 @@ impl PostingSerializer {
         &mut self,
         bm25_weight: &Bm25Weight,
         fieldnorm_reader: &R,
-    ) -> (u32, u32, u32) {
+        term_meta: &mut PostingTermMetaData,
+    ) {
         if !self.doc_ids.is_empty() {
             let (blockwand_tf, blockwand_fieldnorm_id) = blockwand_max_calculate(
                 &self.doc_ids,
@@ -209,57 +202,67 @@ impl PostingSerializer {
                 fieldnorm_reader,
             );
             let skip_block = SkipBlock {
-                last_doc: *self.doc_ids.last().unwrap(),
-                doc_cnt: self.doc_ids.len().try_into().unwrap(),
+                last_doc: self.last_doc(),
+                doc_cnt: self.doc_cnt(),
                 blockwand_tf,
                 size: 0,
                 blockwand_fieldnorm_id,
                 flag: SkipBlockFlags::UNFULLED,
             };
-            self.skip_info_writer
-                .as_mut()
-                .unwrap()
-                .write(bytemuck::bytes_of(&skip_block));
+            term_meta.unfulled_skip_block = Some(skip_block);
         }
 
-        let skip_info_last_blkno = self.skip_info_writer.as_ref().unwrap().blkno();
-        let skip_info_blkno = self.skip_info_writer.take().unwrap().finalize();
-        let block_data_blkno = self.block_data_writer.take().unwrap().finalize();
+        let [skip_info_last_blkno, skip_info_blkno, block_data_blkno] =
+            match (self.skip_info_writer.take(), self.block_data_writer.take()) {
+                (Some(skip_info_writer), Some(block_data_writer)) => {
+                    let skip_info_last_blkno = skip_info_writer.blkno();
+                    let skip_info_blkno = skip_info_writer.finalize();
+                    let block_data_blkno = block_data_writer.finalize();
+                    [skip_info_last_blkno, skip_info_blkno, block_data_blkno]
+                }
+                (None, None) => [pgrx::pg_sys::InvalidBlockNumber; 3],
+                _ => {
+                    panic!("Inconsistent state: only one of the writers is None")
+                }
+            };
+        term_meta.last_full_block_last_docid = self.prev_block_last_doc_id;
+        term_meta.skip_info_blkno = skip_info_blkno;
+        term_meta.skip_info_last_blkno = skip_info_last_blkno;
+        term_meta.block_data_blkno = block_data_blkno;
+
         self.doc_ids.clear();
         self.term_freqs.clear();
-        (skip_info_blkno, skip_info_last_blkno, block_data_blkno)
+        self.prev_block_last_doc_id = 0;
     }
 
     pub fn flush_block(&mut self, blockwand_tf: u32, blockwand_fieldnorm_id: u8) {
         let offset = NonZeroU32::new(self.prev_block_last_doc_id);
-        self.prev_block_last_doc_id = *self.doc_ids.last().unwrap();
+        let prev_block_last_doc_id = self.last_doc();
+        let doc_cnt = self.doc_cnt();
+
+        self.init_writers();
+        self.prev_block_last_doc_id = prev_block_last_doc_id;
         let data = self
             .block_encode
             .encode(offset, &mut self.doc_ids, &mut self.term_freqs);
 
-        let page_changed = self
-            .block_data_writer
-            .as_mut()
-            .unwrap()
-            .write_vectorized_no_cross(&[data]);
+        let block_data_writer = self.block_data_writer.as_mut().unwrap();
+        let page_changed = block_data_writer.write_vectorized_no_cross(&[data]);
 
         let mut flag = SkipBlockFlags::empty();
         if page_changed {
             flag |= SkipBlockFlags::PAGE_CHANGED;
         }
-        let doc_cnt = self.doc_ids.len().try_into().unwrap();
         let skip_block = SkipBlock {
-            last_doc: self.prev_block_last_doc_id,
+            last_doc: prev_block_last_doc_id,
             doc_cnt,
             blockwand_tf,
             size: data.len().try_into().unwrap(),
             blockwand_fieldnorm_id,
             flag,
         };
-        self.skip_info_writer
-            .as_mut()
-            .unwrap()
-            .write(bytemuck::bytes_of(&skip_block));
+        let skip_info_writer = self.skip_info_writer.as_mut().unwrap();
+        skip_info_writer.write(bytemuck::bytes_of(&skip_block));
 
         self.doc_ids.clear();
         self.term_freqs.clear();
@@ -269,8 +272,27 @@ impl PostingSerializer {
         (&self.doc_ids, &self.term_freqs)
     }
 
-    pub fn prev_block_last_doc_id(&self) -> u32 {
-        self.prev_block_last_doc_id
+    fn init_writers(&mut self) {
+        match (&mut self.skip_info_writer, &mut self.block_data_writer) {
+            (Some(_), Some(_)) => {}
+            (skip_info_writer @ None, block_data_writer @ None) => {
+                *skip_info_writer = Some(PageWriter::new(self.index, PageFlags::SKIP_INFO, true));
+                *block_data_writer = Some(VirtualPageWriter::new(
+                    self.index,
+                    PageFlags::BLOCK_DATA,
+                    true,
+                ));
+            }
+            _ => panic!("Inconsistent state: only one of the writers is None"),
+        }
+    }
+
+    fn doc_cnt(&self) -> u32 {
+        self.doc_ids.len().try_into().unwrap()
+    }
+
+    fn last_doc(&self) -> u32 {
+        *self.doc_ids.last().unwrap()
     }
 }
 
