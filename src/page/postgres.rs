@@ -14,7 +14,7 @@ pub const METAPAGE_BLKNO: pgrx::pg_sys::BlockNumber = 0;
 pub const BM25_PAGE_ID: u16 = 0xFF88;
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PageFlags: u16 {
         const META = 1 << 0;
         const PAYLOAD = 1 << 1;
@@ -27,6 +27,7 @@ bitflags::bitflags! {
         const GROWING = 1 << 8;
         const DELETE = 1 << 9;
         const GROWING_REDIRECT = 1 << 10;
+        const VIRTUAL_INODE = 1 << 11;
         const FREE = 1 << 15;
     }
 }
@@ -200,6 +201,16 @@ impl PageWriteGuard {
             let page = NonNull::new(BufferGetPage(buf).cast()).expect("failed to get page");
             PageReadGuard { buf, page }
         }
+    }
+
+    pub fn init_mut<T: Default>(&mut self) -> &mut T {
+        assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
+        let ptr = self.content.as_mut_ptr() as *mut T;
+        unsafe {
+            ptr.write(T::default());
+        }
+        self.header.pd_lower += std::mem::size_of::<T>() as u16;
+        unsafe { &mut *ptr }
     }
 }
 

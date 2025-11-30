@@ -122,7 +122,7 @@ pub struct VirtualPageWriter {
 
 impl VirtualPageWriter {
     pub fn init_fork(relation: pgrx::pg_sys::Relation, flag: PageFlags) -> u32 {
-        let mut direct_inode = page_alloc_init_forknum(relation, flag);
+        let mut direct_inode = page_alloc_init_forknum(relation, PageFlags::VIRTUAL_INODE);
         let data_page = page_alloc_init_forknum(relation, flag);
         let first_blkno = direct_inode.blkno();
         direct_inode.freespace_mut()[..4].copy_from_slice(&data_page.blkno().to_le_bytes());
@@ -131,7 +131,8 @@ impl VirtualPageWriter {
     }
 
     pub fn new(relation: pgrx::pg_sys::Relation, flag: PageFlags, skip_lock_rel: bool) -> Self {
-        let mut direct_inode = page_alloc_with_fsm(relation, flag, skip_lock_rel);
+        let mut direct_inode =
+            page_alloc_with_fsm(relation, PageFlags::VIRTUAL_INODE, skip_lock_rel);
         let data_page = page_alloc_with_fsm(relation, flag, skip_lock_rel);
         let first_blkno = direct_inode.blkno();
         direct_inode.freespace_mut()[..4].copy_from_slice(&data_page.blkno().to_le_bytes());
@@ -288,12 +289,18 @@ impl VirtualPageWriter {
                     return;
                 }
 
-                let mut indirect1_inode =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+                let mut indirect1_inode = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
                 direct_inode.opaque.next_blkno = indirect1_inode.blkno();
 
-                let mut indirect1_page =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+                let mut indirect1_page = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
                 // First entry points to the first indirect1 data page
                 try_append_inode_entry(&mut indirect1_inode, indirect1_page.blkno());
                 // First data entry points to the new data page
@@ -310,8 +317,11 @@ impl VirtualPageWriter {
                     return;
                 }
 
-                let mut new_indirect1_page =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+                let mut new_indirect1_page = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
                 try_append_inode_entry(&mut new_indirect1_page, data_page.blkno());
 
                 if try_append_inode_entry(indirect1_inode, new_indirect1_page.blkno()) {
@@ -320,12 +330,18 @@ impl VirtualPageWriter {
                     return;
                 }
 
-                let mut indirect2_inode =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+                let mut indirect2_inode = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
                 indirect1_inode.opaque.next_blkno = indirect2_inode.blkno();
 
-                let mut indirect2_page =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+                let mut indirect2_page = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
                 try_append_inode_entry(&mut indirect2_inode, indirect2_page.blkno());
                 try_append_inode_entry(&mut indirect2_page, new_indirect1_page.blkno());
 
@@ -346,9 +362,12 @@ impl VirtualPageWriter {
                     return;
                 }
 
-                let mut new_indirect1_page =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
-                let _ = try_append_inode_entry(&mut new_indirect1_page, data_page.blkno());
+                let mut new_indirect1_page = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
+                try_append_inode_entry(&mut new_indirect1_page, data_page.blkno());
 
                 if try_append_inode_entry(indirect2_page, new_indirect1_page.blkno()) {
                     *old_data_page = data_page;
@@ -356,8 +375,11 @@ impl VirtualPageWriter {
                     return;
                 }
 
-                let mut new_indirect2_page =
-                    page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+                let mut new_indirect2_page = page_alloc_with_fsm(
+                    self.relation,
+                    PageFlags::VIRTUAL_INODE,
+                    self.skip_lock_rel,
+                );
                 try_append_inode_entry(&mut new_indirect2_page, new_indirect1_page.blkno());
 
                 if try_append_inode_entry(indirect2_inode, new_indirect2_page.blkno()) {

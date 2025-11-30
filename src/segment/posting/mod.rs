@@ -14,7 +14,7 @@ pub const TERMINATED_DOC: u32 = u32::MAX;
 
 pub const COMPRESSION_BLOCK_SIZE: usize = 128;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PostingTermInfo {
     pub meta_blkno: pgrx::pg_sys::BlockNumber,
 }
@@ -30,6 +30,7 @@ impl PostingTermInfo {
 unsafe impl Zeroable for PostingTermInfo {}
 unsafe impl Pod for PostingTermInfo {}
 
+#[derive(Debug)]
 pub struct PostingTermMetaData {
     pub skip_info_blkno: pgrx::pg_sys::BlockNumber,
     pub skip_info_last_blkno: pgrx::pg_sys::BlockNumber,
@@ -39,6 +40,21 @@ pub struct PostingTermMetaData {
     pub unfulled_docid: [u32; 128],
     pub unfulled_freq: [u32; 128],
     pub unfulled_skip_block: Option<SkipBlock>,
+}
+
+impl Default for PostingTermMetaData {
+    fn default() -> Self {
+        Self {
+            skip_info_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            skip_info_last_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            block_data_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            block_count: 0,
+            last_full_block_last_docid: 0,
+            unfulled_docid: [0; 128],
+            unfulled_freq: [0; 128],
+            unfulled_skip_block: None,
+        }
+    }
 }
 
 bitflags::bitflags! {

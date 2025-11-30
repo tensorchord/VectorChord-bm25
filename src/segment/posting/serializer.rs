@@ -99,9 +99,7 @@ impl<R: FieldNormRead> InvertedWrite for InvertedSerializer<R> {
         self.block_partition.reset();
 
         let mut term_meta_guard = page_alloc(self.index, PageFlags::TERM_META, true);
-        let term_meta_page = &mut *term_meta_guard;
-        term_meta_page.header.pd_lower += std::mem::size_of::<PostingTermMetaData>() as u16;
-        let term_meta: &mut PostingTermMetaData = term_meta_page.as_mut();
+        let term_meta: &mut PostingTermMetaData = term_meta_guard.init_mut();
 
         let (unflushed_docids, unflushed_term_freqs) = self.postings_serializer.unflushed_data();
         let unfulled_doc_cnt = unflushed_docids.len();

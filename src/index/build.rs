@@ -3,8 +3,8 @@ use pgrx::{itemptr::item_pointer_to_u64, FromDatum, PgMemoryContexts};
 use crate::{
     datatype::Bm25VectorInput,
     page::{
-        page_alloc, page_alloc_init_forknum, page_write, PageFlags, PageWriteGuard,
-        VirtualPageWriter, METAPAGE_BLKNO,
+        page_alloc, page_alloc_init_forknum, page_write, PageFlags, VirtualPageWriter,
+        METAPAGE_BLKNO,
     },
     segment::{builder::IndexBuilder, meta::MetaPageData},
 };
@@ -14,7 +14,7 @@ pub extern "C-unwind" fn ambuildempty(index: pgrx::pg_sys::Relation) {
     let mut meta_page = page_alloc_init_forknum(index, PageFlags::META);
     assert_eq!(meta_page.blkno(), METAPAGE_BLKNO);
 
-    let meta = init_meta_page(&mut meta_page);
+    let meta: &mut MetaPageData = meta_page.init_mut();
     meta.field_norm_blkno = VirtualPageWriter::init_fork(index, PageFlags::FIELD_NORM);
     meta.term_stat_blkno = VirtualPageWriter::init_fork(index, PageFlags::TERM_STATISTIC);
     meta.payload_blkno = VirtualPageWriter::init_fork(index, PageFlags::PAYLOAD);
@@ -92,7 +92,7 @@ fn write_down(state: &BuildState) {
     let term_id_cnt = state.builder.term_id_cnt();
 
     let mut meta_page = page_write(state.index, METAPAGE_BLKNO);
-    let meta = init_meta_page(&mut meta_page);
+    let meta: &mut MetaPageData = meta_page.init_mut();
     meta.doc_cnt = doc_cnt;
     meta.doc_term_cnt = doc_term_cnt;
     meta.term_id_cnt = term_id_cnt;
@@ -120,13 +120,4 @@ fn write_down(state: &BuildState) {
     meta.term_stat_blkno = term_stat_blkno;
     meta.delete_bitmap_blkno = delete_bitmap_blkno;
     meta.sealed_segment = sealed_data;
-}
-
-fn init_meta_page(page_guard: &mut PageWriteGuard) -> &mut MetaPageData {
-    let ptr = page_guard.content.as_mut_ptr() as *mut MetaPageData;
-    unsafe {
-        ptr.write(MetaPageData::default());
-    }
-    page_guard.header.pd_lower += std::mem::size_of::<MetaPageData>() as u16;
-    unsafe { &mut *ptr }
 }

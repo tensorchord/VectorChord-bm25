@@ -99,14 +99,18 @@ impl PostingCursor {
             let skip_info_page_id = term_meta.skip_info_blkno;
             Gn::new_scoped_local(move |mut s| {
                 let mut skip_info_page_id = skip_info_page_id;
+                let mut skip_info_data = Vec::new();
                 while skip_info_page_id != pgrx::pg_sys::InvalidBlockNumber {
-                    let page = page_read(index, skip_info_page_id);
-                    let skip_info_data = page.data();
+                    {
+                        let page = page_read(index, skip_info_page_id);
+                        skip_info_data.clear();
+                        skip_info_data.extend_from_slice(page.data());
+                        skip_info_page_id = page.opaque.next_blkno;
+                    }
                     for chunk in skip_info_data.chunks(std::mem::size_of::<SkipBlock>()) {
                         let skip_info: &SkipBlock = bytemuck::from_bytes(chunk);
                         s.yield_with(*skip_info);
                     }
-                    skip_info_page_id = page.opaque.next_blkno;
                 }
                 if let Some(skip_block) = unfulled_skip_block {
                     s.yield_with(skip_block);

@@ -105,9 +105,7 @@ impl InvertedAppender {
         }
 
         let mut term_meta_guard = page_alloc_with_fsm(self.index, PageFlags::TERM_META, true);
-        let term_meta_page = &mut *term_meta_guard;
-        term_meta_page.header.pd_lower += std::mem::size_of::<PostingTermMetaData>() as u16;
-        let term_meta: &mut PostingTermMetaData = term_meta_page.as_mut();
+        let term_meta: &mut PostingTermMetaData = term_meta_guard.init_mut();
 
         let (unflushed_docids, unflushed_term_freqs) = serializer.unflushed_data();
         let unfulled_doc_cnt = unflushed_docids.len();
@@ -195,6 +193,7 @@ impl InvertedAppender {
                     flag,
                 };
                 append_skip_info(self.index, term_meta, skip_info);
+                term_meta.unfulled_skip_block = None;
             }
         }
 
@@ -207,7 +206,7 @@ impl InvertedAppender {
                 blockwand_fieldnorm_id,
                 flag: SkipBlockFlags::UNFULLED,
             };
-            append_skip_info(self.index, term_meta, skip_info);
+            term_meta.unfulled_skip_block = Some(skip_info);
             block_count += 1;
         }
         term_meta.block_count = block_count;

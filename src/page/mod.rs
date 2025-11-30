@@ -1,3 +1,4 @@
+mod inspector;
 mod postgres;
 mod reader;
 mod r#virtual;
