@@ -43,12 +43,16 @@ fn bm25_page_inspect(index: pgrx::PgRelation, blkno: i32) -> String {
         }
         PageFlags::GROWING => {
             let data: &[u8] = page.data();
-            format!("Delete Bitmap Page ({} bytes):\n{:02X?}", data.len(), data)
+            format!(
+                "Growing Segment Page ({} bytes):\n{:02X?}",
+                data.len(),
+                data
+            )
         }
         PageFlags::GROWING_REDIRECT => {
             let data: &[u8] = page.data();
             format!(
-                "Delete Bitmap Redirect Page ({} bytes):\n{:02X?}",
+                "Growing Segment Redirect Page ({} bytes):\n{:02X?}",
                 data.len(),
                 data
             )
