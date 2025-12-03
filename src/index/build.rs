@@ -6,43 +6,19 @@ use crate::{
         page_alloc, page_alloc_init_forknum, page_write, PageFlags, VirtualPageWriter,
         METAPAGE_BLKNO,
     },
-    segment::{
-        builder::IndexBuilder,
-        meta::{MetaPageData, META_VERSION},
-        sealed::SealedSegmentData,
-    },
+    segment::{builder::IndexBuilder, meta::MetaPageData},
 };
 
 #[pgrx::pg_guard]
 pub extern "C-unwind" fn ambuildempty(index: pgrx::pg_sys::Relation) {
     let mut meta_page = page_alloc_init_forknum(index, PageFlags::META);
     assert_eq!(meta_page.blkno(), METAPAGE_BLKNO);
-    let field_norm_blkno = VirtualPageWriter::init_fork(index, PageFlags::FIELD_NORM);
-    let term_stat_blkno = VirtualPageWriter::init_fork(index, PageFlags::TERM_STATISTIC);
-    let payload_blkno = VirtualPageWriter::init_fork(index, PageFlags::PAYLOAD);
-    let delete_bitmap_blkno = VirtualPageWriter::init_fork(index, PageFlags::DELETE);
 
-    let ptr = meta_page.content.as_mut_ptr() as *mut MetaPageData;
-    unsafe {
-        ptr.write(MetaPageData {
-            version: META_VERSION,
-            doc_cnt: 0,
-            doc_term_cnt: 0,
-            term_id_cnt: 0,
-            field_norm_blkno,
-            payload_blkno,
-            term_stat_blkno,
-            delete_bitmap_blkno,
-            current_doc_id: 0,
-            sealed_doc_id: 0,
-            growing_segment: None,
-            sealed_segment: SealedSegmentData {
-                term_info_blkno: pgrx::pg_sys::InvalidBlockNumber,
-                term_id_cnt: 0,
-            },
-        });
-        meta_page.header.pd_lower += std::mem::size_of::<MetaPageData>() as u16;
-    }
+    let meta: &mut MetaPageData = meta_page.init_mut();
+    meta.field_norm_blkno = VirtualPageWriter::init_fork(index, PageFlags::FIELD_NORM);
+    meta.term_stat_blkno = VirtualPageWriter::init_fork(index, PageFlags::TERM_STATISTIC);
+    meta.payload_blkno = VirtualPageWriter::init_fork(index, PageFlags::PAYLOAD);
+    meta.delete_bitmap_blkno = VirtualPageWriter::init_fork(index, PageFlags::DELETE);
 }
 
 struct BuildState {
@@ -114,29 +90,14 @@ fn write_down(state: &BuildState) {
     let doc_cnt = state.builder.doc_cnt();
     let doc_term_cnt = state.builder.doc_term_cnt();
     let term_id_cnt = state.builder.term_id_cnt();
+
     let mut meta_page = page_write(state.index, METAPAGE_BLKNO);
-    let ptr = meta_page.content.as_mut_ptr() as *mut MetaPageData;
-    unsafe {
-        ptr.write(MetaPageData {
-            version: META_VERSION,
-            doc_cnt,
-            doc_term_cnt,
-            term_id_cnt,
-            field_norm_blkno: pgrx::pg_sys::InvalidBlockNumber,
-            payload_blkno: pgrx::pg_sys::InvalidBlockNumber,
-            term_stat_blkno: pgrx::pg_sys::InvalidBlockNumber,
-            delete_bitmap_blkno: pgrx::pg_sys::InvalidBlockNumber,
-            current_doc_id: doc_cnt,
-            sealed_doc_id: doc_cnt,
-            growing_segment: None,
-            sealed_segment: SealedSegmentData {
-                term_info_blkno: pgrx::pg_sys::InvalidBlockNumber,
-                term_id_cnt,
-            },
-        });
-        meta_page.header.pd_lower += std::mem::size_of::<MetaPageData>() as u16;
-    }
-    let meta: &mut MetaPageData = meta_page.as_mut();
+    let meta: &mut MetaPageData = meta_page.init_mut();
+    meta.doc_cnt = doc_cnt;
+    meta.doc_term_cnt = doc_term_cnt;
+    meta.term_id_cnt = term_id_cnt;
+    meta.current_doc_id = doc_cnt;
+    meta.sealed_doc_id = doc_cnt;
 
     // delete bitmap
     let mut delete_bitmap_writer = VirtualPageWriter::new(state.index, PageFlags::DELETE, true);

@@ -27,7 +27,7 @@ pub fn extend_delete_bit(
     blkno: pgrx::pg_sys::BlockNumber,
     doc_id: u32,
 ) {
-    if doc_id % 8 == 0 {
+    if doc_id.is_multiple_of(8) {
         let mut writer = VirtualPageWriter::open(index, blkno, true);
         writer.write(&[0]);
     }

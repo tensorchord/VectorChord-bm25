@@ -4,8 +4,8 @@ use std::{
 };
 
 const _: () = {
-    assert!(std::mem::size_of::<pgrx::pg_sys::PageHeaderData>() % 8 == 0);
-    assert!(std::mem::size_of::<Bm25PageOpaqueData>() % 8 == 0);
+    assert!(std::mem::size_of::<pgrx::pg_sys::PageHeaderData>().is_multiple_of(8));
+    assert!(std::mem::size_of::<Bm25PageOpaqueData>().is_multiple_of(8));
     assert!(std::mem::size_of::<PageData>() == pgrx::pg_sys::BLCKSZ as usize);
 };
 
@@ -14,7 +14,7 @@ pub const METAPAGE_BLKNO: pgrx::pg_sys::BlockNumber = 0;
 pub const BM25_PAGE_ID: u16 = 0xFF88;
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PageFlags: u16 {
         const META = 1 << 0;
         const PAYLOAD = 1 << 1;
@@ -27,15 +27,16 @@ bitflags::bitflags! {
         const GROWING = 1 << 8;
         const DELETE = 1 << 9;
         const GROWING_REDIRECT = 1 << 10;
+        const VIRTUAL_INODE = 1 << 11;
         const FREE = 1 << 15;
     }
 }
 
-pub const fn bm25_page_size() -> usize {
+pub const BM25_PAGE_SIZE: usize = {
     pgrx::pg_sys::BLCKSZ as usize
         - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>()
         - std::mem::size_of::<Bm25PageOpaqueData>()
-}
+};
 
 #[repr(C, align(8))]
 pub struct Bm25PageOpaqueData {
@@ -47,7 +48,7 @@ pub struct Bm25PageOpaqueData {
 #[repr(C, align(8))]
 pub struct PageData {
     pub header: pgrx::pg_sys::PageHeaderData,
-    pub content: [u8; bm25_page_size()],
+    pub content: [u8; BM25_PAGE_SIZE],
     pub opaque: Bm25PageOpaqueData,
 }
 
@@ -93,7 +94,7 @@ impl PageData {
 impl<T> AsRef<T> for PageData {
     fn as_ref(&self) -> &T {
         const {
-            assert!(std::mem::size_of::<T>() <= bm25_page_size());
+            assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
         }
         unsafe { &*(self.content.as_ptr() as *const T) }
     }
@@ -102,7 +103,7 @@ impl<T> AsRef<T> for PageData {
 impl<T> AsMut<T> for PageData {
     fn as_mut(&mut self) -> &mut T {
         const {
-            assert!(std::mem::size_of::<T>() <= bm25_page_size());
+            assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
         }
         unsafe { &mut *(self.content.as_mut_ptr() as *mut T) }
     }
@@ -200,6 +201,16 @@ impl PageWriteGuard {
             let page = NonNull::new(BufferGetPage(buf).cast()).expect("failed to get page");
             PageReadGuard { buf, page }
         }
+    }
+
+    pub fn init_mut<T: Default>(&mut self) -> &mut T {
+        assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
+        let ptr = self.content.as_mut_ptr() as *mut T;
+        unsafe {
+            ptr.write(T::default());
+        }
+        self.header.pd_lower += std::mem::size_of::<T>() as u16;
+        unsafe { &mut *ptr }
     }
 }
 
@@ -472,7 +483,7 @@ bitflags::bitflags! {
 }
 
 pub fn page_append_item(page: &mut PageData, item: &[u8], redirect: bool) -> bool {
-    if item.len() > bm25_page_size() {
+    if item.len() > BM25_PAGE_SIZE {
         return false;
     }
 

@@ -18,6 +18,28 @@ pub struct MetaPageData {
     pub sealed_segment: SealedSegmentData,
 }
 
+impl Default for MetaPageData {
+    fn default() -> Self {
+        MetaPageData {
+            version: META_VERSION,
+            doc_cnt: 0,
+            doc_term_cnt: 0,
+            term_id_cnt: 0,
+            field_norm_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            payload_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            term_stat_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            delete_bitmap_blkno: pgrx::pg_sys::InvalidBlockNumber,
+            current_doc_id: 0,
+            sealed_doc_id: 0,
+            growing_segment: None,
+            sealed_segment: SealedSegmentData {
+                term_info_blkno: pgrx::pg_sys::InvalidBlockNumber,
+                term_id_cnt: 0,
+            },
+        }
+    }
+}
+
 impl MetaPageData {
     pub fn avgdl(&self) -> f32 {
         self.doc_term_cnt as f32 / self.doc_cnt as f32
