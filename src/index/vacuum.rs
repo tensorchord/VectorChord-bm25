@@ -55,7 +55,12 @@ pub unsafe extern "C-unwind" fn ambulkdelete(
 
         for i in 0..meta.current_doc_id {
             if i % BM25_PAGE_SIZE as u32 == 0 {
-                #[cfg(not(feature = "pg18"))]
+                #[cfg(any(
+                    feature = "pg14",
+                    feature = "pg15",
+                    feature = "pg16",
+                    feature = "pg17"
+                ))]
                 pgrx::pg_sys::vacuum_delay_point();
                 #[cfg(feature = "pg18")]
                 pgrx::pg_sys::vacuum_delay_point(false);
