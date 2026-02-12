@@ -196,3 +196,8 @@ jobs:
       - name: Fuzz
         run: |
           cargo run -p fuzz -- "user=$(whoami) dbname=$(whoami) host=localhost"
+
+      - name: Logging
+        if: always()
+        run: |
+          cat /var/log/postgresql/postgresql-${{ matrix.version }}-main.log

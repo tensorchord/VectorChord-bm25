@@ -50,7 +50,7 @@ fn test(client: &mut postgres::Client) {
         CREATE TABLE documents (
             id SERIAL PRIMARY KEY,
             embedding bm25vector
-        );
+        ) WITH (autovacuum_enabled = off);
         "#,
             &[],
         )
