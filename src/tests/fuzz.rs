@@ -1,11 +1,11 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Debug,
-};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Debug;
 
 use crate::datatype::Bm25VectorOutput;
-use pgrx::{spi::SpiClient, Spi};
-use rand::{seq::IndexedRandom, Rng, SeedableRng};
+use pgrx::Spi;
+use pgrx::spi::SpiClient;
+use rand::seq::IndexedRandom;
+use rand::{RngExt, SeedableRng};
 
 #[allow(unused)]
 #[derive(Debug, Clone, Copy)]
@@ -99,12 +99,12 @@ fn test_random_operations_inner(client: &mut SpiClient<'_>) {
     }
 }
 
-fn random_bm25vector(rng: &mut impl Rng) -> Bm25VectorOutput {
+fn random_bm25vector(rng: &mut impl RngExt) -> Bm25VectorOutput {
     let ids = (0..DOCUMENT_LEN).map(|_| rng.random_range(0..DOCUMENT_MAX_TOKEN));
     Bm25VectorOutput::from_ids(ids)
 }
 
-fn fuzz_insert(client: &mut SpiClient<'_>, rng: &mut impl Rng) {
+fn fuzz_insert(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
     let bm25vector = random_bm25vector(rng);
     client
         .update(
@@ -139,7 +139,7 @@ impl Ord for OrderedFloat {
     }
 }
 
-fn fuzz_select(client: &mut SpiClient<'_>, rng: &mut impl Rng) {
+fn fuzz_select(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
     let query_vector = random_bm25vector(rng);
     let query_vector_clone = Bm25VectorOutput::new(query_vector.borrow());
 
@@ -222,14 +222,14 @@ fn fuzz_select(client: &mut SpiClient<'_>, rng: &mut impl Rng) {
     }
 }
 
-fn fuzz_delete(client: &mut SpiClient<'_>, rng: &mut impl Rng) {
+fn fuzz_delete(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
     let id = rng.random_range(1..INIT_DOCUMENTS) as i32;
     client
         .update(r#"DELETE FROM documents WHERE id = $1"#, None, &[id.into()])
         .unwrap();
 }
 
-fn fuzz_vacuum(client: &mut SpiClient<'_>, _rng: &mut impl Rng) {
+fn fuzz_vacuum(client: &mut SpiClient<'_>, _rng: &mut impl RngExt) {
     client
         .update(r#"VACUUM FULL documents"#, None, &[])
         .unwrap();

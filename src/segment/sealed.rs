@@ -1,10 +1,9 @@
-use crate::{datatype::Bm25VectorBorrowed, page::VirtualPageWriter};
+use crate::datatype::Bm25VectorBorrowed;
+use crate::page::VirtualPageWriter;
 
-use super::{
-    field_norm::FieldNormRead,
-    posting::{
-        InvertedSerializer, InvertedWriter, PostingCursor, PostingTermInfo, PostingTermInfoReader,
-    },
+use super::field_norm::FieldNormRead;
+use super::posting::{
+    InvertedSerializer, InvertedWriter, PostingCursor, PostingTermInfo, PostingTermInfoReader,
 };
 
 #[derive(Debug, Clone, Copy)]

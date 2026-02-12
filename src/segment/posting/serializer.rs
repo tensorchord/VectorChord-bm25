@@ -1,19 +1,14 @@
 use std::num::NonZeroU32;
 
-use crate::{
-    algorithm::{
-        block_encode::{BlockEncode, BlockEncodeTrait},
-        block_partition::{BlockPartition, BlockPartitionTrait},
-    },
-    page::{page_alloc, PageFlags, PageWriter, VirtualPageWriter},
-    segment::{
-        field_norm::{id_to_fieldnorm, FieldNormRead},
-        posting::SkipBlockFlags,
-    },
-    weight::{idf, Bm25Weight},
-};
+use crate::algorithm::block_encode::{BlockEncode, BlockEncodeTrait};
+use crate::algorithm::block_partition::{BlockPartition, BlockPartitionTrait};
+use crate::page::{PageFlags, PageWriter, VirtualPageWriter, page_alloc};
+use crate::segment::field_norm::{FieldNormRead, id_to_fieldnorm};
+use crate::segment::posting::SkipBlockFlags;
+use crate::weight::{Bm25Weight, idf};
 
-use super::{writer::TFRecorder, PostingTermInfo, PostingTermMetaData, SkipBlock};
+use super::writer::TFRecorder;
+use super::{PostingTermInfo, PostingTermMetaData, SkipBlock};
 
 pub trait InvertedWrite {
     fn write(&mut self, recorder: Option<&TFRecorder>);
@@ -176,7 +171,9 @@ impl PostingSerializer {
             || self.block_data_writer.is_some()
             || self.prev_block_last_doc_id != 0
         {
-            panic!("Writers are already initialized for the previous term. Call close_term() before starting a new term.");
+            panic!(
+                "Writers are already initialized for the previous term. Call close_term() before starting a new term."
+            );
         }
     }
 

@@ -1,11 +1,9 @@
 use crate::datatype::Bm25VectorBorrowed;
 
-use super::{
-    field_norm::FieldNormWriter,
-    payload::PayloadWriter,
-    posting::{InvertedSerializer, InvertedWriter, TERMINATED_DOC},
-    sealed::SealedSegmentData,
-};
+use super::field_norm::FieldNormWriter;
+use super::payload::PayloadWriter;
+use super::posting::{InvertedSerializer, InvertedWriter, TERMINATED_DOC};
+use super::sealed::SealedSegmentData;
 
 /// Builder for inverted index, used to build the inverted index in memory from empty.
 pub struct IndexBuilder {

@@ -1,21 +1,23 @@
 use std::num::NonZero;
 
 use lending_iterator::LendingIterator;
-use pgrx::{prelude::PgHeapTuple, FromDatum};
+use pgrx::FromDatum;
+use pgrx::prelude::PgHeapTuple;
 
-use crate::{
-    algorithm::block_wand::{block_wand, block_wand_single, SealedScorer},
-    datatype::{Bm25VectorBorrowed, Bm25VectorOutput},
-    guc::{BM25_LIMIT, ENABLE_PREFILTER},
-    page::{page_read, METAPAGE_BLKNO},
-    segment::{
-        delete::DeleteBitmapReader, field_norm::FieldNormReader, growing::GrowingSegmentReader,
-        meta::MetaPageData, payload::PayloadReader, sealed::SealedSegmentReader,
-        term_stat::TermStatReader,
-    },
-    utils::{loser_tree::LoserTree, topk_computer::TopKComputer},
-    weight::{bm25_score_batch, idf, Bm25Weight},
-};
+use crate::algorithm::block_wand::{SealedScorer, block_wand, block_wand_single};
+use crate::datatype::{Bm25VectorBorrowed, Bm25VectorOutput};
+use crate::guc::{BM25_LIMIT, ENABLE_PREFILTER};
+use crate::page::{METAPAGE_BLKNO, page_read};
+use crate::segment::delete::DeleteBitmapReader;
+use crate::segment::field_norm::FieldNormReader;
+use crate::segment::growing::GrowingSegmentReader;
+use crate::segment::meta::MetaPageData;
+use crate::segment::payload::PayloadReader;
+use crate::segment::sealed::SealedSegmentReader;
+use crate::segment::term_stat::TermStatReader;
+use crate::utils::loser_tree::LoserTree;
+use crate::utils::topk_computer::TopKComputer;
+use crate::weight::{Bm25Weight, bm25_score_batch, idf};
 
 pub enum Scanner {
     Initial {
@@ -57,17 +59,19 @@ pub unsafe extern "C-unwind" fn ambeginscan(
     n_keys: std::os::raw::c_int,
     n_orderbys: std::os::raw::c_int,
 ) -> pgrx::pg_sys::IndexScanDesc {
-    use pgrx::memcxt::PgMemoryContexts::CurrentMemoryContext;
+    unsafe {
+        use pgrx::memcxt::PgMemoryContexts::CurrentMemoryContext;
 
-    assert!(n_keys == 0, "it doesn't support WHERE clause");
-    assert!(n_orderbys == 1, "it only supports one ORDER BY clause");
-    let scan = pgrx::pg_sys::RelationGetIndexScan(index, n_keys, n_orderbys);
-    (*scan).opaque = CurrentMemoryContext
-        .leak_and_drop_on_delete(Scanner::Initial {
-            node: std::ptr::null_mut(),
-        })
-        .cast();
-    scan
+        assert!(n_keys == 0, "it doesn't support WHERE clause");
+        assert!(n_orderbys == 1, "it only supports one ORDER BY clause");
+        let scan = pgrx::pg_sys::RelationGetIndexScan(index, n_keys, n_orderbys);
+        (*scan).opaque = CurrentMemoryContext
+            .leak_and_drop_on_delete(Scanner::Initial {
+                node: std::ptr::null_mut(),
+            })
+            .cast();
+        scan
+    }
 }
 
 #[pgrx::pg_guard]
@@ -78,27 +82,29 @@ pub unsafe extern "C-unwind" fn amrescan(
     orderbys: pgrx::pg_sys::ScanKey,
     _n_orderbys: std::os::raw::c_int,
 ) {
-    assert!(!orderbys.is_null());
-    std::ptr::copy(orderbys, (*scan).orderByData, (*scan).numberOfOrderBys as _);
-    let data = (*scan).orderByData;
-    let value = (*data).sk_argument;
-    let is_null = ((*data).sk_flags & pgrx::pg_sys::SK_ISNULL as i32) != 0;
-    let bm25_query = PgHeapTuple::from_datum(value, is_null).unwrap();
-    let index_oid = bm25_query
-        .get_by_index(NonZero::new(1).unwrap())
-        .unwrap()
-        .unwrap();
-    let query_vector = bm25_query
-        .get_by_index(NonZero::new(2).unwrap())
-        .unwrap()
-        .unwrap();
+    unsafe {
+        assert!(!orderbys.is_null());
+        std::ptr::copy(orderbys, (*scan).orderByData, (*scan).numberOfOrderBys as _);
+        let data = (*scan).orderByData;
+        let value = (*data).sk_argument;
+        let is_null = ((*data).sk_flags & pgrx::pg_sys::SK_ISNULL as i32) != 0;
+        let bm25_query = PgHeapTuple::from_datum(value, is_null).unwrap();
+        let index_oid = bm25_query
+            .get_by_index(NonZero::new(1).unwrap())
+            .unwrap()
+            .unwrap();
+        let query_vector = bm25_query
+            .get_by_index(NonZero::new(2).unwrap())
+            .unwrap()
+            .unwrap();
 
-    let scanner = (*scan).opaque.cast::<Scanner>().as_mut().unwrap();
-    *scanner = Scanner::Waiting {
-        node: scanner.node(),
-        query_index: pgrx::PgRelation::with_lock(index_oid, pgrx::pg_sys::AccessShareLock as _),
-        query_vector,
-    };
+        let scanner = (*scan).opaque.cast::<Scanner>().as_mut().unwrap();
+        *scanner = Scanner::Waiting {
+            node: scanner.node(),
+            query_index: pgrx::PgRelation::with_lock(index_oid, pgrx::pg_sys::AccessShareLock as _),
+            query_vector,
+        };
+    }
 }
 
 #[pgrx::pg_guard]
@@ -354,56 +360,49 @@ unsafe fn execute_boolean_qual(
     state: *mut pgrx::pg_sys::ExprState,
     econtext: *mut pgrx::pg_sys::ExprContext,
 ) -> bool {
-    use pgrx::PgMemoryContexts;
-    if state.is_null() {
-        return true;
+    unsafe {
+        use pgrx::PgMemoryContexts;
+        if state.is_null() {
+            return true;
+        }
+        assert!((*state).flags & pgrx::pg_sys::EEO_FLAG_IS_QUAL as u8 != 0);
+        let mut is_null = true;
+        pgrx::pg_sys::MemoryContextReset((*econtext).ecxt_per_tuple_memory);
+        let ret = PgMemoryContexts::For((*econtext).ecxt_per_tuple_memory)
+            .switch_to(|_| (*state).evalfunc.unwrap()(state, econtext, &mut is_null));
+        assert!(!is_null);
+        bool::from_datum(ret, is_null).unwrap()
     }
-    assert!((*state).flags & pgrx::pg_sys::EEO_FLAG_IS_QUAL as u8 != 0);
-    let mut is_null = true;
-    pgrx::pg_sys::MemoryContextReset((*econtext).ecxt_per_tuple_memory);
-    let ret = PgMemoryContexts::For((*econtext).ecxt_per_tuple_memory)
-        .switch_to(|_| (*state).evalfunc.unwrap()(state, econtext, &mut is_null));
-    assert!(!is_null);
-    bool::from_datum(ret, is_null).unwrap()
 }
 
 unsafe fn check_quals(node: *mut pgrx::pg_sys::IndexScanState) -> bool {
-    let slot = (*node).ss.ss_ScanTupleSlot;
-    let econtext = (*node).ss.ps.ps_ExprContext;
-    (*econtext).ecxt_scantuple = slot;
-    if (*node).ss.ps.qual.is_null() {
-        return true;
+    unsafe {
+        let slot = (*node).ss.ss_ScanTupleSlot;
+        let econtext = (*node).ss.ps.ps_ExprContext;
+        (*econtext).ecxt_scantuple = slot;
+        if (*node).ss.ps.qual.is_null() {
+            return true;
+        }
+        let state = (*node).ss.ps.qual;
+        let econtext = (*node).ss.ps.ps_ExprContext;
+        execute_boolean_qual(state, econtext)
     }
-    let state = (*node).ss.ps.qual;
-    let econtext = (*node).ss.ps.ps_ExprContext;
-    execute_boolean_qual(state, econtext)
 }
 
 unsafe fn check_mvcc(
     node: *mut pgrx::pg_sys::IndexScanState,
     p: pgrx::pg_sys::ItemPointer,
 ) -> bool {
-    let scan_desc = (*node).iss_ScanDesc;
-    let heap_fetch = (*scan_desc).xs_heapfetch;
-    let index_relation = (*heap_fetch).rel;
-    let rd_tableam = (*index_relation).rd_tableam;
-    let snapshot = (*scan_desc).xs_snapshot;
-    let index_fetch_tuple = (*rd_tableam).index_fetch_tuple.unwrap();
-    let mut all_dead = false;
-    let slot = (*node).ss.ss_ScanTupleSlot;
-    let mut heap_continue = false;
-    let found = index_fetch_tuple(
-        heap_fetch,
-        p,
-        snapshot,
-        slot,
-        &mut heap_continue,
-        &mut all_dead,
-    );
-    if found {
-        return true;
-    }
-    while heap_continue {
+    unsafe {
+        let scan_desc = (*node).iss_ScanDesc;
+        let heap_fetch = (*scan_desc).xs_heapfetch;
+        let index_relation = (*heap_fetch).rel;
+        let rd_tableam = (*index_relation).rd_tableam;
+        let snapshot = (*scan_desc).xs_snapshot;
+        let index_fetch_tuple = (*rd_tableam).index_fetch_tuple.unwrap();
+        let mut all_dead = false;
+        let slot = (*node).ss.ss_ScanTupleSlot;
+        let mut heap_continue = false;
         let found = index_fetch_tuple(
             heap_fetch,
             p,
@@ -415,19 +414,34 @@ unsafe fn check_mvcc(
         if found {
             return true;
         }
+        while heap_continue {
+            let found = index_fetch_tuple(
+                heap_fetch,
+                p,
+                snapshot,
+                slot,
+                &mut heap_continue,
+                &mut all_dead,
+            );
+            if found {
+                return true;
+            }
+        }
+        false
     }
-    false
 }
 
 unsafe fn check(node: *mut pgrx::pg_sys::IndexScanState, p: pgrx::pg_sys::ItemPointer) -> bool {
-    if node.is_null() {
-        return true;
+    unsafe {
+        if node.is_null() {
+            return true;
+        }
+        if !check_mvcc(node, p) {
+            return false;
+        }
+        if !check_quals(node) {
+            return false;
+        }
+        true
     }
-    if !check_mvcc(node, p) {
-        return false;
-    }
-    if !check_quals(node) {
-        return false;
-    }
-    true
 }

@@ -1,13 +1,12 @@
 use std::ffi::c_char;
 
-use pgrx::IntoDatum;
-use pgrx::{pg_sys::Oid, Internal};
+use pgrx::pg_sys::Oid;
+use pgrx::{Internal, IntoDatum};
 
 use crate::datatype::bm25vector::Bm25VectorBorrowed;
 
 use super::bytea::Bytea;
-use super::memory_bm25vector::Bm25VectorInput;
-use super::memory_bm25vector::Bm25VectorOutput;
+use super::memory_bm25vector::{Bm25VectorInput, Bm25VectorOutput};
 
 #[pgrx::pg_extern(immutable, strict, parallel_safe)]
 fn _bm25catalog_bm25vector_send(vector: Bm25VectorInput<'_>) -> Bytea {

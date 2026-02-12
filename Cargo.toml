@@ -1,9 +1,11 @@
 [package]
 name = "vchord_bm25"
-version = "0.2.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+publish = false
 
 [lib]
+name = "vchord_bm25"
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
@@ -22,37 +24,64 @@ pg_test = ["dep:rand"]
 [dependencies]
 arrayvec = "0.7.6"
 bitflags = "2.10.0"
-bitpacking = { version = "0.9", default-features = false, features = [
+bitpacking = { version = "0.9.3", default-features = false, features = [
     "bitpacker4x",
 ] }
-bytemuck = "1.24"
-generator = "0.8.7"
+bytemuck = "1.25.0"
+generator = "0.8.8"
 lending-iterator = "0.1.7"
-pgrx = "=0.16.1"
-serde = { version = "1.0.217", features = ["derive"] }
-thiserror = "2"
+pgrx = "=0.17.0"
+serde.workspace = true
+thiserror = "2.0.18"
 
 # used for `pg_test` and `test`
-rand = { version = "0.9", optional = true }
+rand = { version = "0.10.0", optional = true }
 
 [dev-dependencies]
-pgrx-tests = "=0.16.1"
+pgrx-tests = "=0.17.0"
+
+[lints]
+workspace = true
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+
+[workspace.lints]
+# complexity
+clippy.too_many_arguments = "allow"
+# unsafe
+rust.unsafe_code = "deny"
+rust.unsafe_op_in_unsafe_fn = "deny"
+# unused
+rust.unused_extern_crates = "warn"
+rust.unused_import_braces = "warn"
+rust.unused_lifetimes = "warn"
+rust.unused_macro_rules = "warn"
+rust.unused_qualifications = "warn"
+
+[profile.dev]
+codegen-units = 256
+lto = "off"
+opt-level = 1
+debug = "full"
+strip = "none"
 
 [profile.release]
-lto = "fat"
 codegen-units = 1
-
-[profile.dev-opt]
-inherits = "dev"
+lto = "fat"
 opt-level = 3
-lto = "thin"
-codegen-units = 8
+debug = "none"
+strip = "symbols"
 
-[lints.clippy]
-manual_is_multiple_of = "allow"
-missing_safety_doc = "allow"
-new_without_default = "allow"
-not_unsafe_ptr_arg_deref = "allow"
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(pgrx_embed)'] }
+[profile.prof]
+inherits = "release"
+debug = "full"
+strip = "none"

@@ -1,20 +1,17 @@
 use std::num::NonZeroU32;
 
-use crate::{
-    algorithm::block_encode::{BlockEncode, BlockEncodeTrait},
-    page::{page_alloc_with_fsm, page_write, PageFlags, VirtualPageWriter},
-    segment::{
-        field_norm::{id_to_fieldnorm, FieldNormRead, FieldNormReader},
-        meta::MetaPageData,
-        posting::{PostingTermInfo, PostingTermMetaData},
-        term_stat::TermStatReader,
-    },
-    weight::{idf, Bm25Weight},
-};
+use crate::algorithm::block_encode::{BlockEncode, BlockEncodeTrait};
+use crate::page::{PageFlags, VirtualPageWriter, page_alloc_with_fsm, page_write};
+use crate::segment::field_norm::{FieldNormRead, FieldNormReader, id_to_fieldnorm};
+use crate::segment::meta::MetaPageData;
+use crate::segment::posting::{PostingTermInfo, PostingTermMetaData};
+use crate::segment::term_stat::TermStatReader;
+use crate::weight::{Bm25Weight, idf};
 
+use super::serializer::PostingSerializer;
+use super::writer::TFRecorder;
 use super::{
-    serializer::PostingSerializer, writer::TFRecorder, InvertedWrite, PostingTermInfoReader,
-    SkipBlock, SkipBlockFlags, COMPRESSION_BLOCK_SIZE,
+    COMPRESSION_BLOCK_SIZE, InvertedWrite, PostingTermInfoReader, SkipBlock, SkipBlockFlags,
 };
 
 pub struct InvertedAppender {
@@ -229,15 +226,15 @@ fn append_skip_info(
     };
 
     let mut freespace = guard.freespace_mut();
-    if freespace.len() < std::mem::size_of::<SkipBlock>() {
+    if freespace.len() < size_of::<SkipBlock>() {
         let new_skip_info_guard = page_alloc_with_fsm(index, PageFlags::SKIP_INFO, false);
         guard.opaque.next_blkno = new_skip_info_guard.blkno();
         term_meta.skip_info_last_blkno = new_skip_info_guard.blkno();
         guard = new_skip_info_guard;
         freespace = guard.freespace_mut();
     }
-    freespace[..std::mem::size_of::<SkipBlock>()].copy_from_slice(bytemuck::bytes_of(&skip_info));
-    guard.header.pd_lower += std::mem::size_of::<SkipBlock>() as u16;
+    freespace[..size_of::<SkipBlock>()].copy_from_slice(bytemuck::bytes_of(&skip_info));
+    guard.header.pd_lower += size_of::<SkipBlock>() as u16;
 }
 
 fn init_block_data_writer<'a>(

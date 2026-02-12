@@ -1,12 +1,10 @@
 use crate::guc::ENABLE_INDEX;
 
-use super::{
-    build::{ambuild, ambuildempty},
-    insert::aminsert,
-    options::amoptions,
-    scan::{ambeginscan, amendscan, amgettuple, amrescan},
-    vacuum::{ambulkdelete, amvacuumcleanup},
-};
+use super::build::{ambuild, ambuildempty};
+use super::insert::aminsert;
+use super::options::amoptions;
+use super::scan::{ambeginscan, amendscan, amgettuple, amrescan};
+use super::vacuum::{ambulkdelete, amvacuumcleanup};
 
 #[pgrx::pg_extern(sql = "\
 CREATE FUNCTION _bm25_amhandler(internal) RETURNS index_am_handler
@@ -59,20 +57,24 @@ pub unsafe extern "C-unwind" fn amcostestimate(
     index_correlation: *mut f64,
     index_pages: *mut f64,
 ) {
-    if !ENABLE_INDEX.get() || ((*path).indexorderbys.is_null() && (*path).indexclauses.is_null()) {
-        *index_startup_cost = f64::MAX;
-        *index_total_cost = f64::MAX;
-        *index_selectivity = 0.0;
-        *index_correlation = 0.0;
+    unsafe {
+        if !ENABLE_INDEX.get()
+            || ((*path).indexorderbys.is_null() && (*path).indexclauses.is_null())
+        {
+            *index_startup_cost = f64::MAX;
+            *index_total_cost = f64::MAX;
+            *index_selectivity = 0.0;
+            *index_correlation = 0.0;
+            *index_pages = 0.0;
+            return;
+        }
+        // TODO: Implement detailed cost estimation
+        *index_startup_cost = 0.0;
+        *index_total_cost = 0.0;
+        *index_selectivity = 1.0;
+        *index_correlation = 1.0;
         *index_pages = 0.0;
-        return;
     }
-    // TODO: Implement detailed cost estimation
-    *index_startup_cost = 0.0;
-    *index_total_cost = 0.0;
-    *index_selectivity = 1.0;
-    *index_correlation = 1.0;
-    *index_pages = 0.0;
 }
 
 #[pgrx::pg_guard]
@@ -84,10 +86,12 @@ pub unsafe extern "C-unwind" fn amproperty(
     res: *mut bool,
     isnull: *mut bool,
 ) -> bool {
-    if attno == 1 && prop == pgrx::pg_sys::IndexAMProperty::AMPROP_DISTANCE_ORDERABLE {
-        *res = true;
-        *isnull = false;
-        return true;
+    unsafe {
+        if attno == 1 && prop == pgrx::pg_sys::IndexAMProperty::AMPROP_DISTANCE_ORDERABLE {
+            *res = true;
+            *isnull = false;
+            return true;
+        }
+        false
     }
-    false
 }

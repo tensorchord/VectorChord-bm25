@@ -1,78 +1,48 @@
 name: Check
 
 on:
-  pull_request:
-    paths:
-      - ".cargo"
-      - ".github/workflows/check.yml"
-      - "src/**"
-      - "tests/**"
-      - "tools/**"
-      - ".taplo.toml"
-      - ".typos.toml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "*.control"
   push:
-    paths:
-      - ".cargo"
-      - ".github/workflows/check.yml"
-      - "src/**"
-      - "tests/**"
-      - "tools/**"
-      - ".taplo.toml"
-      - ".typos.toml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "*.control"
-  merge_group:
+  pull_request:
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  SCCACHE_GHA_ENABLED: true
-  RUSTC_WRAPPER: sccache
-  RUSTFLAGS: "-Dwarnings"
-
 jobs:
   style:
-    runs-on: "ubuntu-latest"
+    runs-on: "ubuntu-24.04"
 
     steps:
+      - name: Set up Environment
+        run: |
+          curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-$(uname -m).gz | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
+
+          curl -fsSL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.18.9/cargo-deny-0.18.9-$(uname -m)-unknown-linux-musl.tar.gz | tar -xOzf - cargo-deny-0.18.9-$(uname -m)-unknown-linux-musl/cargo-deny | install -m 755 /dev/stdin /usr/local/bin/cargo-deny
+
+      - name: Install Rust
+        run: rustup update
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Typos
         uses: crate-ci/typos@master
+
       - name: Taplo
-        run: |
-          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-full-linux-$(uname -m).gz | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
-          taplo fmt --check
+        run: taplo fmt --check
+
       - name: Rustfmt
-        run: cargo fmt --check
+        run: cargo fmt --check -- --config-path /dev/null --config imports_granularity=Module
 
-  get-dependencies-version:
-    runs-on: ubuntu-latest
-    outputs:
-      PG_TOKENIZER_VERSION: ${{ steps.get-dependencies-version.outputs.PG_TOKENIZER_VERSION }}
-    steps:
-      - name: Get dependencies latest version
-        id: get-dependencies-version
-        run: |
-          PG_TOKENIZER_VERSION=$(curl -sSL https://api.github.com/repos/tensorchord/pg_tokenizer.rs/releases/latest | jq -r '.tag_name')
-          if [ "$PG_TOKENIZER_VERSION" == "null" ]; then
-            echo "Failed to get PG_TOKENIZER_VERSION"
-            exit 1
-          else
-            echo "PG_TOKENIZER_VERSION=$PG_TOKENIZER_VERSION" >> $GITHUB_OUTPUT
-          fi
+      - name: Deny
+        run: cargo deny check
 
-  lint:
-    needs: ["get-dependencies-version"]
+#      - name: SQL
+#        run: |
+#          ! grep -P '\t' -r ./sql
+
+  psql:
     strategy:
       matrix:
         version: ["14", "15", "16", "17", "18"]
@@ -80,36 +50,90 @@ jobs:
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
 
     env:
-      POSTGRES_VERSION: ${{ matrix.version }}
-      PLATFORM: ${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}
-      PG_TOKENIZER_VERSION: ${{ needs.get-dependencies-version.outputs.PG_TOKENIZER_VERSION }}
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTUP_AUTO_INSTALL: "0"
+      RUSTC_WRAPPER: "sccache"
+      RUSTFLAGS: "-Dwarnings"
+      CARGO_TERM_COLOR: "always"
+      RUST_BACKTRACE: "1"
+      PG_TOKENIZER: "0.1.1"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
       - name: Set up Environment
-        run: ./tools/setup.sh
-      - name: Set up Sccache
-        uses: mozilla-actions/sccache-action@v0.0.8
-      - name: Clippy
-        run: cargo clippy --features "pg${{ matrix.version }} pg_test"
-      - name: Test
         run: |
-          export tmp_file=$(mktemp)
-          getfacl -R /usr/share/postgresql > $tmp_file
-          getfacl -R /usr/lib/postgresql >> $tmp_file
-          sudo chmod -R 777 /usr/share/postgresql
-          sudo chmod -R 777 /usr/lib/postgresql
+          sudo apt-get update
 
-          cargo pgrx test --features pg${{ matrix.version }}
+          curl -fsSL https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.29.0/sqllogictest-bin-v0.29.0-$(uname -m)-unknown-linux-musl.tar.gz | tar -xOzf - ./sqllogictest | install -m 755 /dev/stdin /usr/local/bin/sqllogictest
 
-          cd /
-          sudo setfacl --restore=$tmp_file
+      - name: Install Rust
+        run: rustup update
+
+      - name: Set up Sccache
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+      - name: Install PostgreSQL & pg_tokenizer.rs
+        run: |
+          sudo apt-get remove -y '^postgres.*' '^libpq.*'
+          sudo apt-get purge -y '^postgres.*' '^libpq.*'
+
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-server-dev-${{ matrix.version }}
+          sudo apt-get install -y --no-install-recommends postgresql-${{ matrix.version }}
+
+          echo "local all all trust" | sudo tee /etc/postgresql/${{ matrix.version }}/main/pg_hba.conf
+          echo "host all all 127.0.0.1/32 trust" | sudo tee -a /etc/postgresql/${{ matrix.version }}/main/pg_hba.conf
+          echo "host all all ::1/128 trust" | sudo tee -a /etc/postgresql/${{ matrix.version }}/main/pg_hba.conf
+
+          sudo mkdir -p /etc/systemd/system/postgresql@.service.d/
+          echo "[Service]" | sudo tee /etc/systemd/system/postgresql@.service.d/limit.conf
+          echo "LimitNOFILE=infinity" | sudo tee -a /etc/systemd/system/postgresql@.service.d/limit.conf
+          echo "LimitMEMLOCK=infinity" | sudo tee -a /etc/systemd/system/postgresql@.service.d/limit.conf
+          sudo systemctl daemon-reload
+
+          sudo -iu postgres createuser -s -r $(whoami)
+          sudo -iu postgres createdb -O $(whoami) $(whoami)
+          if [ "${{ matrix.version }}" -ge "18" ]; then
+            psql -c 'ALTER SYSTEM SET io_method = io_uring'
+          fi
+          psql -c 'ALTER SYSTEM SET max_worker_processes = 1024'
+          psql -c 'ALTER SYSTEM SET shared_preload_libraries = pg_tokenizer, vchord_bm25'
+          psql -c 'ALTER SYSTEM SET search_path = "\$user", public, tokenizer_catalog, bm25_catalog'
+          sudo systemctl stop postgresql
+
+          pg_config
+          echo PG_CONFIG=pg_config >> $GITHUB_ENV
+
+          mkdir ~/pg_tokenizer-install
+          curl -fsSL https://github.com/tensorchord/pg_tokenizer.rs/releases/download/${PG_TOKENIZER}/postgresql-${{ matrix.version }}-pg-tokenizer_${PG_TOKENIZER}-1_$(dpkg --print-architecture).deb -o ~/pg_tokenizer-install/pg_tokenizer.deb
+          sudo apt-get install -y ~/pg_tokenizer-install/pg_tokenizer.deb
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Clippy
+        run: make PROFILE=dev clippy
+
+      - name: Build
+        run: make PROFILE=dev build
+
       - name: Install
-        run: cargo pgrx install --features "pg${{ matrix.version }}" --release --sudo
-      - name: SqlLogicTest
+        run: sudo make PG_CONFIG=$PG_CONFIG install
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: postgresql-${{ matrix.version }}-vchord-bm25_0.0.0_${{ matrix.arch }}-linux-gnu
+          path: ./build
+          compression-level: 9
+          retention-days: 14
+
+      - name: Service
         run: |
           sudo systemctl start postgresql
           psql -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;'
           psql -c 'CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;'
-          sqllogictest --db $USER --user $USER './tests/**/*.slt'
+
+      - name: SqlLogicTest
+        run: |
+          sqllogictest --db $(whoami) --user $(whoami) './tests/sqllogictest/*.slt'

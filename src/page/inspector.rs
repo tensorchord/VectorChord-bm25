@@ -1,9 +1,7 @@
-use crate::segment::{
-    meta::MetaPageData,
-    posting::{PostingTermMetaData, SkipBlock},
-};
+use crate::segment::meta::MetaPageData;
+use crate::segment::posting::{PostingTermMetaData, SkipBlock};
 
-use super::{page_read, PageFlags};
+use super::{PageFlags, page_read};
 
 #[pgrx::pg_extern]
 fn bm25_page_inspect(index: pgrx::PgRelation, blkno: i32) -> String {

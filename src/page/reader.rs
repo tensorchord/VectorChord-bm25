@@ -1,6 +1,6 @@
 use crate::page::BM25_PAGE_SIZE;
 
-use super::{page_read, page_write, PageReadGuard};
+use super::{PageReadGuard, page_read, page_write};
 
 pub struct ContinuousPageReader<T> {
     index: pgrx::pg_sys::Relation,
@@ -10,8 +10,8 @@ pub struct ContinuousPageReader<T> {
 
 impl<T: Copy> ContinuousPageReader<T> {
     const PAGE_COUNT: u32 = {
-        assert!(std::mem::align_of::<T>() <= 8);
-        (BM25_PAGE_SIZE / std::mem::size_of::<T>()) as u32
+        assert!(align_of::<T>() <= 8);
+        (BM25_PAGE_SIZE / size_of::<T>()) as u32
     };
 
     pub fn new(index: pgrx::pg_sys::Relation, start_blkno: pgrx::pg_sys::BlockNumber) -> Self {

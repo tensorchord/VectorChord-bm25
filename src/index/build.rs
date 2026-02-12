@@ -1,13 +1,12 @@
-use pgrx::{itemptr::item_pointer_to_u64, FromDatum, PgMemoryContexts};
+use pgrx::itemptr::item_pointer_to_u64;
+use pgrx::{FromDatum, PgMemoryContexts};
 
-use crate::{
-    datatype::Bm25VectorInput,
-    page::{
-        page_alloc, page_alloc_init_forknum, page_write, PageFlags, VirtualPageWriter,
-        METAPAGE_BLKNO,
-    },
-    segment::{builder::IndexBuilder, meta::MetaPageData},
+use crate::datatype::Bm25VectorInput;
+use crate::page::{
+    METAPAGE_BLKNO, PageFlags, VirtualPageWriter, page_alloc, page_alloc_init_forknum, page_write,
 };
+use crate::segment::builder::IndexBuilder;
+use crate::segment::meta::MetaPageData;
 
 #[pgrx::pg_guard]
 pub extern "C-unwind" fn ambuildempty(index: pgrx::pg_sys::Relation) {

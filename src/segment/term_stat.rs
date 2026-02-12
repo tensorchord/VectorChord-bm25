@@ -26,7 +26,7 @@ impl TermStatReader {
 
         let mut res: u32 = 0;
         self.page_reader.read_at(
-            term_id * std::mem::size_of::<u32>() as u32,
+            term_id * size_of::<u32>() as u32,
             bytemuck::bytes_of_mut(&mut res),
         );
         res
@@ -34,8 +34,8 @@ impl TermStatReader {
 
     pub fn update(&self, term_id: u32, f: impl FnOnce(&mut u32)) {
         self.page_reader.update_at(
-            term_id * std::mem::size_of::<u32>() as u32,
-            std::mem::size_of::<u32>() as u32,
+            term_id * size_of::<u32>() as u32,
+            size_of::<u32>() as u32,
             |data| {
                 f(bytemuck::from_bytes_mut(data));
             },
@@ -51,7 +51,7 @@ pub fn extend_term_id(index: pgrx::pg_sys::Relation, meta: &mut MetaPageData, te
 
     let mut page_writer = VirtualPageWriter::open(index, meta.term_stat_blkno, false);
     for _ in old_term_id_cnt..term_id_cnt {
-        page_writer.write(&[0u8; std::mem::size_of::<u32>()]);
+        page_writer.write(&[0u8; size_of::<u32>()]);
     }
     meta.term_id_cnt = term_id_cnt;
 }

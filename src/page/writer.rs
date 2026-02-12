@@ -1,6 +1,6 @@
 use std::ops::DerefMut;
 
-use super::{page_alloc_init_forknum, page_alloc_with_fsm, page_write, PageFlags, PageWriteGuard};
+use super::{PageFlags, PageWriteGuard, page_alloc_init_forknum, page_alloc_with_fsm, page_write};
 
 pub struct PageWriterInitFork {
     relation: pgrx::pg_sys::Relation,

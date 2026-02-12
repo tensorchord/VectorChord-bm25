@@ -1,8 +1,6 @@
-use crate::{
-    datatype::Bm25VectorBorrowed,
-    segment::field_norm::{fieldnorm_to_id, id_to_fieldnorm},
-    segment::term_stat::TermStatReader,
-};
+use crate::datatype::Bm25VectorBorrowed;
+use crate::segment::field_norm::{fieldnorm_to_id, id_to_fieldnorm};
+use crate::segment::term_stat::TermStatReader;
 
 const K1: f32 = 1.2;
 const B: f32 = 0.75;

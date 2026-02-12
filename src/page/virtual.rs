@@ -1,6 +1,6 @@
 use super::{
-    page_alloc_init_forknum, page_alloc_with_fsm, page_read, page_write, PageFlags, PageWriteGuard,
-    BM25_PAGE_SIZE,
+    BM25_PAGE_SIZE, PageFlags, PageWriteGuard, page_alloc_init_forknum, page_alloc_with_fsm,
+    page_read, page_write,
 };
 
 const DIRECT_COUNT: usize = BM25_PAGE_SIZE / 4;
@@ -353,7 +353,12 @@ impl VirtualPageWriter {
                 ]);
             }
             VirtualPageWriterState::Indirect2(
-                [old_data_page, indirect1_page, indirect2_page, indirect2_inode],
+                [
+                    old_data_page,
+                    indirect1_page,
+                    indirect2_page,
+                    indirect2_inode,
+                ],
             ) => {
                 let data_page = page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
                 old_data_page.opaque.next_blkno = data_page.blkno();

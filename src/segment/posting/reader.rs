@@ -1,13 +1,12 @@
 use std::num::NonZeroU32;
 
-use generator::{done, Gn};
+use generator::{Gn, done};
 
-use crate::{
-    algorithm::block_encode::{BlockDecode, BlockDecodeTrait},
-    page::{page_read, VirtualPageReader},
-    segment::{field_norm::id_to_fieldnorm, sealed::SealedSegmentData},
-    weight::Bm25Weight,
-};
+use crate::algorithm::block_encode::{BlockDecode, BlockDecodeTrait};
+use crate::page::{VirtualPageReader, page_read};
+use crate::segment::field_norm::id_to_fieldnorm;
+use crate::segment::sealed::SealedSegmentData;
+use crate::weight::Bm25Weight;
 
 use super::{PostingTermInfo, PostingTermMetaData, SkipBlock, SkipBlockFlags, TERMINATED_DOC};
 
@@ -31,7 +30,7 @@ impl PostingTermInfoReader {
             return res;
         }
         self.page_reader.read_at(
-            term_id * std::mem::size_of::<PostingTermInfo>() as u32,
+            term_id * size_of::<PostingTermInfo>() as u32,
             bytemuck::bytes_of_mut(&mut res),
         );
         res
@@ -40,8 +39,8 @@ impl PostingTermInfoReader {
     pub fn write(&mut self, term_id: u32, info: PostingTermInfo) {
         assert!(term_id < self.term_id_cnt);
         self.page_reader.update_at(
-            term_id * std::mem::size_of::<PostingTermInfo>() as u32,
-            std::mem::size_of::<PostingTermInfo>() as u32,
+            term_id * size_of::<PostingTermInfo>() as u32,
+            size_of::<PostingTermInfo>() as u32,
             |data| {
                 data.copy_from_slice(bytemuck::bytes_of(&info));
             },
@@ -107,7 +106,7 @@ impl PostingCursor {
                         skip_info_data.extend_from_slice(page.data());
                         skip_info_page_id = page.opaque.next_blkno;
                     }
-                    for chunk in skip_info_data.chunks(std::mem::size_of::<SkipBlock>()) {
+                    for chunk in skip_info_data.chunks(size_of::<SkipBlock>()) {
                         let skip_info: &SkipBlock = bytemuck::from_bytes(chunk);
                         s.yield_with(*skip_info);
                     }

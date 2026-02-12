@@ -1,13 +1,13 @@
+use std::alloc::Layout;
 use std::collections::BTreeMap;
-use std::{alloc::Layout, ops::Deref, ptr::NonNull};
+use std::ops::Deref;
+use std::ptr::NonNull;
 
-use pgrx::{
-    pg_sys::{Datum, Oid},
-    pgrx_sql_entity_graph::metadata::{
-        ArgumentError, Returns, ReturnsError, SqlMapping, SqlTranslatable,
-    },
-    FromDatum, IntoDatum,
+use pgrx::pg_sys::{Datum, Oid};
+use pgrx::pgrx_sql_entity_graph::metadata::{
+    ArgumentError, Returns, ReturnsError, SqlMapping, SqlTranslatable,
 };
+use pgrx::{FromDatum, IntoDatum};
 
 use super::bm25vector::Bm25VectorBorrowed;
 
@@ -170,17 +170,18 @@ impl IntoDatum for Bm25VectorOutput {
 
 impl FromDatum for Bm25VectorOutput {
     unsafe fn from_polymorphic_datum(datum: Datum, is_null: bool, _typoid: Oid) -> Option<Self> {
-        if is_null {
-            None
-        } else {
-            let p = NonNull::new(datum.cast_mut_ptr::<Bm25VectorHeader>())?;
-            let q =
-                unsafe { NonNull::new(pgrx::pg_sys::pg_detoast_datum(p.cast().as_ptr()).cast())? };
-            if p != q {
-                Some(Bm25VectorOutput(q))
+        unsafe {
+            if is_null {
+                None
             } else {
-                let vector = p.as_ref().borrow();
-                Some(Bm25VectorOutput::new(vector))
+                let p = NonNull::new(datum.cast_mut_ptr::<Bm25VectorHeader>())?;
+                let q = NonNull::new(pgrx::pg_sys::pg_detoast_datum(p.cast().as_ptr()).cast())?;
+                if p != q {
+                    Some(Bm25VectorOutput(q))
+                } else {
+                    let vector = p.as_ref().borrow();
+                    Some(Bm25VectorOutput::new(vector))
+                }
             }
         }
     }
@@ -193,15 +194,15 @@ unsafe impl pgrx::datum::UnboxDatum for Bm25VectorOutput {
     where
         Self: 'src,
     {
-        let p = NonNull::new(d.sans_lifetime().cast_mut_ptr::<Bm25VectorHeader>()).unwrap();
-        let q = unsafe {
-            NonNull::new(pgrx::pg_sys::pg_detoast_datum(p.cast().as_ptr()).cast()).unwrap()
-        };
-        if p != q {
-            Bm25VectorOutput(q)
-        } else {
-            let vector = p.as_ref().borrow();
-            Bm25VectorOutput::new(vector)
+        unsafe {
+            let p = NonNull::new(d.sans_lifetime().cast_mut_ptr::<Bm25VectorHeader>()).unwrap();
+            let q = NonNull::new(pgrx::pg_sys::pg_detoast_datum(p.cast().as_ptr()).cast()).unwrap();
+            if p != q {
+                Bm25VectorOutput(q)
+            } else {
+                let vector = p.as_ref().borrow();
+                Bm25VectorOutput::new(vector)
+            }
         }
     }
 }

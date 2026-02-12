@@ -1,5 +1,5 @@
 use pgrx::datum::IntoDatum;
-use pgrx::pg_sys::{bytea, Datum, Oid};
+use pgrx::pg_sys::{Datum, Oid, bytea};
 use pgrx::pgrx_sql_entity_graph::metadata::*;
 
 #[repr(transparent)]

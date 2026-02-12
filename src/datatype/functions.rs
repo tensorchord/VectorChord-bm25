@@ -1,10 +1,9 @@
 use std::num::NonZero;
 
-use crate::{
-    page::{page_read, METAPAGE_BLKNO},
-    segment::{meta::MetaPageData, term_stat::TermStatReader},
-    weight::bm25_score_batch,
-};
+use crate::page::{METAPAGE_BLKNO, page_read};
+use crate::segment::meta::MetaPageData;
+use crate::segment::term_stat::TermStatReader;
+use crate::weight::bm25_score_batch;
 
 use super::memory_bm25vector::{Bm25VectorInput, Bm25VectorOutput};
 

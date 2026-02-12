@@ -1,12 +1,10 @@
-use std::{
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-};
+use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 
 const _: () = {
-    assert!(std::mem::size_of::<pgrx::pg_sys::PageHeaderData>().is_multiple_of(8));
-    assert!(std::mem::size_of::<Bm25PageOpaqueData>().is_multiple_of(8));
-    assert!(std::mem::size_of::<PageData>() == pgrx::pg_sys::BLCKSZ as usize);
+    assert!(size_of::<pgrx::pg_sys::PageHeaderData>().is_multiple_of(8));
+    assert!(size_of::<Bm25PageOpaqueData>().is_multiple_of(8));
+    assert!(size_of::<PageData>() == pgrx::pg_sys::BLCKSZ as usize);
 };
 
 pub const P_NEW: pgrx::pg_sys::BlockNumber = pgrx::pg_sys::InvalidBlockNumber;
@@ -34,8 +32,8 @@ bitflags::bitflags! {
 
 pub const BM25_PAGE_SIZE: usize = {
     pgrx::pg_sys::BLCKSZ as usize
-        - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>()
-        - std::mem::size_of::<Bm25PageOpaqueData>()
+        - size_of::<pgrx::pg_sys::PageHeaderData>()
+        - size_of::<Bm25PageOpaqueData>()
 };
 
 #[repr(C, align(8))]
@@ -58,7 +56,7 @@ impl PageData {
             pgrx::pg_sys::PageInit(
                 self as *mut _ as _,
                 pgrx::pg_sys::BLCKSZ as _,
-                std::mem::size_of::<Bm25PageOpaqueData>(),
+                size_of::<Bm25PageOpaqueData>(),
             );
             (&raw mut self.opaque).write(Bm25PageOpaqueData {
                 next_blkno: pgrx::pg_sys::InvalidBlockNumber,
@@ -70,19 +68,19 @@ impl PageData {
 
     pub fn data(&self) -> &[u8] {
         let pd_lower = self.header.pd_lower as usize;
-        let lower_offset = pd_lower - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>();
+        let lower_offset = pd_lower - size_of::<pgrx::pg_sys::PageHeaderData>();
         &self.content[..lower_offset]
     }
 
     pub fn data_mut(&mut self) -> &mut [u8] {
         let pd_lower = self.header.pd_lower as usize;
-        let lower_offset = pd_lower - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>();
+        let lower_offset = pd_lower - size_of::<pgrx::pg_sys::PageHeaderData>();
         &mut self.content[..lower_offset]
     }
 
     pub fn freespace_mut(&mut self) -> &mut [u8] {
         let pd_lower = self.header.pd_lower as usize;
-        let lower_offset = pd_lower - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>();
+        let lower_offset = pd_lower - size_of::<pgrx::pg_sys::PageHeaderData>();
         &mut self.content[lower_offset..]
     }
 
@@ -94,7 +92,7 @@ impl PageData {
 impl<T> AsRef<T> for PageData {
     fn as_ref(&self) -> &T {
         const {
-            assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
+            assert!(size_of::<T>() <= BM25_PAGE_SIZE);
         }
         unsafe { &*(self.content.as_ptr() as *const T) }
     }
@@ -103,7 +101,7 @@ impl<T> AsRef<T> for PageData {
 impl<T> AsMut<T> for PageData {
     fn as_mut(&mut self) -> &mut T {
         const {
-            assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
+            assert!(size_of::<T>() <= BM25_PAGE_SIZE);
         }
         unsafe { &mut *(self.content.as_mut_ptr() as *mut T) }
     }
@@ -123,8 +121,8 @@ impl PageReadGuard {
     pub fn upgrade(self, relation: pgrx::pg_sys::Relation) -> PageWriteGuard {
         unsafe {
             use pgrx::pg_sys::{
-                GenericXLogRegisterBuffer, GenericXLogStart, LockBuffer, BUFFER_LOCK_EXCLUSIVE,
-                BUFFER_LOCK_UNLOCK, GENERIC_XLOG_FULL_IMAGE,
+                BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_UNLOCK, GENERIC_XLOG_FULL_IMAGE,
+                GenericXLogRegisterBuffer, GenericXLogStart, LockBuffer,
             };
             let buf = self.buf;
             std::mem::forget(self);
@@ -161,8 +159,8 @@ pub fn page_read(
     assert!(blkno != pgrx::pg_sys::InvalidBlockNumber);
     unsafe {
         use pgrx::pg_sys::{
-            BufferGetPage, ForkNumber, LockBuffer, ReadBufferExtended, ReadBufferMode,
-            BUFFER_LOCK_SHARE,
+            BUFFER_LOCK_SHARE, BufferGetPage, ForkNumber, LockBuffer, ReadBufferExtended,
+            ReadBufferMode,
         };
         let buf = ReadBufferExtended(
             relation,
@@ -191,7 +189,7 @@ impl PageWriteGuard {
     // not guaranteed to be atomic
     pub fn degrade(self) -> PageReadGuard {
         unsafe {
-            use pgrx::pg_sys::{BufferGetPage, LockBuffer, BUFFER_LOCK_SHARE, BUFFER_LOCK_UNLOCK};
+            use pgrx::pg_sys::{BUFFER_LOCK_SHARE, BUFFER_LOCK_UNLOCK, BufferGetPage, LockBuffer};
             let buf = self.buf;
             let state = self.state;
             std::mem::forget(self);
@@ -204,12 +202,12 @@ impl PageWriteGuard {
     }
 
     pub fn init_mut<T: Default>(&mut self) -> &mut T {
-        assert!(std::mem::size_of::<T>() <= BM25_PAGE_SIZE);
+        assert!(size_of::<T>() <= BM25_PAGE_SIZE);
         let ptr = self.content.as_mut_ptr() as *mut T;
         unsafe {
             ptr.write(T::default());
         }
-        self.header.pd_lower += std::mem::size_of::<T>() as u16;
+        self.header.pd_lower += size_of::<T>() as u16;
         unsafe { &mut *ptr }
     }
 }
@@ -248,8 +246,8 @@ pub fn page_write(
     assert!(blkno != pgrx::pg_sys::InvalidBlockNumber);
     unsafe {
         use pgrx::pg_sys::{
-            ForkNumber, GenericXLogRegisterBuffer, GenericXLogStart, LockBuffer,
-            ReadBufferExtended, ReadBufferMode, BUFFER_LOCK_EXCLUSIVE,
+            BUFFER_LOCK_EXCLUSIVE, ForkNumber, GenericXLogRegisterBuffer, GenericXLogStart,
+            LockBuffer, ReadBufferExtended, ReadBufferMode,
         };
         let buf = ReadBufferExtended(
             relation,
@@ -273,11 +271,10 @@ pub fn page_alloc(
     skip_lock_rel: bool,
 ) -> PageWriteGuard {
     unsafe {
+        use pgrx::pg_sys::ExtendBufferedFlags::{EB_LOCK_FIRST, EB_SKIP_EXTENSION_LOCK};
         use pgrx::pg_sys::{
-            BufferManagerRelation,
-            ExtendBufferedFlags::{EB_LOCK_FIRST, EB_SKIP_EXTENSION_LOCK},
-            ExtendBufferedRel, ForkNumber, GenericXLogRegisterBuffer, GenericXLogStart,
-            GENERIC_XLOG_FULL_IMAGE,
+            BufferManagerRelation, ExtendBufferedRel, ForkNumber, GENERIC_XLOG_FULL_IMAGE,
+            GenericXLogRegisterBuffer, GenericXLogStart,
         };
         let mut arg_flags = EB_LOCK_FIRST;
         if skip_lock_rel {
@@ -313,9 +310,9 @@ pub fn page_alloc(
 ) -> PageWriteGuard {
     unsafe {
         use pgrx::pg_sys::{
-            ExclusiveLock, GenericXLogRegisterBuffer, GenericXLogStart, LockBuffer,
-            LockRelationForExtension, ReadBuffer, UnlockRelationForExtension,
-            BUFFER_LOCK_EXCLUSIVE, GENERIC_XLOG_FULL_IMAGE,
+            BUFFER_LOCK_EXCLUSIVE, ExclusiveLock, GENERIC_XLOG_FULL_IMAGE,
+            GenericXLogRegisterBuffer, GenericXLogStart, LockBuffer, LockRelationForExtension,
+            ReadBuffer, UnlockRelationForExtension,
         };
         if !skip_lock_rel {
             LockRelationForExtension(relation, ExclusiveLock as _);
@@ -343,11 +340,10 @@ pub fn page_alloc_init_forknum(
     flag: PageFlags,
 ) -> PageWriteGuard {
     unsafe {
+        use pgrx::pg_sys::ExtendBufferedFlags::{EB_LOCK_FIRST, EB_SKIP_EXTENSION_LOCK};
         use pgrx::pg_sys::{
-            BufferManagerRelation,
-            ExtendBufferedFlags::{EB_LOCK_FIRST, EB_SKIP_EXTENSION_LOCK},
-            ExtendBufferedRel, ForkNumber, GenericXLogRegisterBuffer, GenericXLogStart,
-            GENERIC_XLOG_FULL_IMAGE,
+            BufferManagerRelation, ExtendBufferedRel, ForkNumber, GENERIC_XLOG_FULL_IMAGE,
+            GenericXLogRegisterBuffer, GenericXLogStart,
         };
         let arg_flags = EB_LOCK_FIRST | EB_SKIP_EXTENSION_LOCK;
         let buf = ExtendBufferedRel(
@@ -379,8 +375,8 @@ pub fn page_alloc_init_forknum(
 ) -> PageWriteGuard {
     unsafe {
         use pgrx::pg_sys::{
-            ForkNumber, GenericXLogRegisterBuffer, GenericXLogStart, LockBuffer,
-            ReadBufferExtended, ReadBufferMode, BUFFER_LOCK_EXCLUSIVE, GENERIC_XLOG_FULL_IMAGE,
+            BUFFER_LOCK_EXCLUSIVE, ForkNumber, GENERIC_XLOG_FULL_IMAGE, GenericXLogRegisterBuffer,
+            GenericXLogStart, LockBuffer, ReadBufferExtended, ReadBufferMode,
         };
         let buf = ReadBufferExtended(
             relation,
@@ -425,9 +421,9 @@ pub fn page_free(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber
 }
 
 pub fn page_get_max_offset_number(page: &PageData) -> u16 {
-    assert!(page.header.pd_lower >= std::mem::size_of::<pgrx::pg_sys::PageHeaderData>() as u16);
-    (page.header.pd_lower - std::mem::size_of::<pgrx::pg_sys::PageHeaderData>() as u16)
-        / std::mem::size_of::<pgrx::pg_sys::ItemIdData>() as u16
+    assert!(page.header.pd_lower >= size_of::<pgrx::pg_sys::PageHeaderData>() as u16);
+    (page.header.pd_lower - size_of::<pgrx::pg_sys::PageHeaderData>() as u16)
+        / size_of::<pgrx::pg_sys::ItemIdData>() as u16
 }
 
 pub fn page_get_item_id(
@@ -462,7 +458,7 @@ pub fn page_get_item<T>(page: &PageData, item_id: pgrx::pg_sys::ItemIdData) -> &
     unsafe {
         let offset = item_id.lp_off();
         let size = item_id.lp_len() as usize;
-        assert!(std::mem::size_of::<T>() <= size);
+        assert!(size_of::<T>() <= size);
         let ptr = (page as *const PageData)
             .cast::<u8>()
             .add(offset as usize)

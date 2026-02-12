@@ -69,7 +69,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use rand::Rng;
+    use rand::RngExt;
 
     fn check(seqs: &[Vec<u32>]) {
         let brute_force = {
@@ -121,7 +121,7 @@ mod test {
         }
 
         fn vecs() -> Vec<Vec<u32>> {
-            use rand::Rng;
+            use rand::RngExt;
             let m = rand::rng().random_range(0..100);
             let mut vecs = Vec::new();
             for _ in 0..m {

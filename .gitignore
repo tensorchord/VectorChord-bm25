@@ -6,3 +6,4 @@
 Cargo.lock
 .vscode/
 .gdb_history
+build

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::{datatype::Bm25VectorBorrowed, utils::vint};
+use crate::datatype::Bm25VectorBorrowed;
+use crate::utils::vint;
 
 use super::serializer::InvertedWrite;
 
@@ -52,7 +53,7 @@ impl InvertedWriter {
         let mut iter = self.term_index.iter().peekable();
         let mut last_term_id = 0;
         std::iter::from_fn(move || {
-            let (&term_id, recorder) = iter.peek()?;
+            let &(&term_id, recorder) = iter.peek()?;
             if last_term_id < term_id {
                 last_term_id += 1;
                 return Some(0);

@@ -1,4 +1,5 @@
-use super::{growing::GrowingSegmentData, sealed::SealedSegmentData};
+use super::growing::GrowingSegmentData;
+use super::sealed::SealedSegmentData;
 
 pub const META_VERSION: u32 = 1;
 
