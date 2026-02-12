@@ -189,6 +189,10 @@ jobs:
           psql -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;'
           psql -c 'CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;'
 
-      - name: SqlLogicTest
+      - name: SqlLogictest
         run: |
           sqllogictest --db $(whoami) --user $(whoami) './tests/sqllogictest/*.slt'
+
+      - name: Fuzz
+        run: |
+          cargo run -p fuzz -- "user=$(whoami) dbname=$(whoami) host=localhost"

@@ -15,9 +15,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
-use crate::datatype::Bm25VectorOutput;
-use pgrx::Spi;
-use pgrx::spi::SpiClient;
 use rand::seq::IndexedRandom;
 use rand::{RngExt, SeedableRng};
 
@@ -28,19 +25,6 @@ enum Operation {
     Select,
     Delete,
     Vacuum,
-}
-
-#[cfg(any(test, feature = "pg_test"))]
-#[pgrx::pg_schema]
-mod tests {
-    use super::*;
-
-    #[pgrx::pg_test]
-    fn test_random_operations() {
-        Spi::connect_mut(|client| {
-            test_random_operations_inner(client);
-        });
-    }
 }
 
 const INIT_DOCUMENTS: u32 = 10000;
@@ -55,20 +39,19 @@ const FUZZ_OPERATIONS: [Operation; 3] = [
     // Operation::Vacuum,
 ];
 
-fn test_random_operations_inner(client: &mut SpiClient<'_>) {
+fn test(client: &mut postgres::Client) {
     let seed = rand::rng().random_range(0..u64::MAX);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     println!("Seed: {}", seed); // for reproducibility
 
     client
-        .update(
+        .execute(
             r#"
         CREATE TABLE documents (
             id SERIAL PRIMARY KEY,
             embedding bm25vector
         );
         "#,
-            None,
             &[],
         )
         .unwrap();
@@ -77,27 +60,24 @@ fn test_random_operations_inner(client: &mut SpiClient<'_>) {
     for _ in 0..INIT_DOCUMENTS {
         let bm25vector = random_bm25vector(&mut rng);
         client
-            .update(
-                r#"INSERT INTO documents (embedding) VALUES ($1);"#,
-                None,
-                &[bm25vector.into()],
+            .execute(
+                r#"INSERT INTO documents (embedding) VALUES ($1::text::bm25vector);"#,
+                &[&bm25vector],
             )
             .unwrap();
     }
 
     // Create index
     client
-        .update(
+        .execute(
             r#"CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);"#,
-            None,
             &[],
         )
         .unwrap();
 
     client
-        .update(
+        .execute(
             r#"SET bm25_catalog.segment_growing_max_page_size = 1;"#,
-            None,
             &[],
         )
         .unwrap();
@@ -111,20 +91,50 @@ fn test_random_operations_inner(client: &mut SpiClient<'_>) {
             Operation::Vacuum => fuzz_vacuum(client, &mut rng),
         }
     }
+
+    client.execute(r#"DROP TABLE documents;"#, &[]).unwrap();
 }
 
-fn random_bm25vector(rng: &mut impl RngExt) -> Bm25VectorOutput {
+fn random_bm25vector(rng: &mut impl RngExt) -> String {
+    pub fn from_ids(ids: impl Iterator<Item = u32>) -> String {
+        use std::fmt::Write;
+        let mut map: BTreeMap<u32, u32> = BTreeMap::new();
+        for term_id in ids {
+            *map.entry(term_id).or_insert(0) += 1;
+        }
+        let mut doc_len: u32 = 0;
+        let mut indexes = Vec::with_capacity(map.len());
+        let mut values = Vec::with_capacity(map.len());
+        for (index, value) in map {
+            indexes.push(index);
+            values.push(value);
+            doc_len = doc_len.checked_add(value).expect("overflow");
+        }
+        let mut buffer = String::new();
+        buffer.push('{');
+        let mut need_splitter = false;
+        for (&index, &value) in indexes.iter().zip(values.iter()) {
+            match need_splitter {
+                false => {
+                    write!(buffer, "{index}:{value}").unwrap();
+                    need_splitter = true;
+                }
+                true => write!(buffer, ", {index}:{value}").unwrap(),
+            }
+        }
+        buffer.push('}');
+        buffer
+    }
     let ids = (0..DOCUMENT_LEN).map(|_| rng.random_range(0..DOCUMENT_MAX_TOKEN));
-    Bm25VectorOutput::from_ids(ids)
+    from_ids(ids)
 }
 
-fn fuzz_insert(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
+fn fuzz_insert(client: &mut postgres::Client, rng: &mut impl RngExt) {
     let bm25vector = random_bm25vector(rng);
     client
-        .update(
-            r#"INSERT INTO documents (embedding) VALUES ($1);"#,
-            None,
-            &[bm25vector.into()],
+        .execute(
+            r#"INSERT INTO documents (embedding) VALUES ($1::text::bm25vector);"#,
+            &[&bm25vector],
         )
         .unwrap();
 }
@@ -153,35 +163,32 @@ impl Ord for OrderedFloat {
     }
 }
 
-fn fuzz_select(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
+fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
     let query_vector = random_bm25vector(rng);
-    let query_vector_clone = Bm25VectorOutput::new(query_vector.borrow());
+    let query_vector_clone = query_vector.clone();
 
+    client.execute("SET enable_seqscan = off", &[]).unwrap();
     client
-        .update("SET enable_seqscan = off", None, &[])
+        .execute("SET bm25_catalog.enable_index = on", &[])
         .unwrap();
     client
-        .update("SET bm25_catalog.enable_index = on", None, &[])
-        .unwrap();
-    client
-        .update("SET bm25_catalog.bm25_limit = 200", None, &[])
+        .execute("SET bm25_catalog.bm25_limit = 200", &[])
         .unwrap();
 
     let restuple = client
-        .select(
+        .query(
             r#"
-            SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', $1) AS rank
+            SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', $1::text::bm25vector) AS rank
             FROM documents
             ORDER BY rank
             LIMIT 100"#,
-            None,
-            &[query_vector.into()],
+            &[&query_vector],
         )
         .unwrap();
     let mut index_results: BTreeMap<OrderedFloat, BTreeSet<i32>> = BTreeMap::new();
     for row in restuple {
-        let id: i32 = row.get(1).unwrap().unwrap();
-        let rank: f32 = row.get(2).unwrap().unwrap();
+        let id: i32 = row.get::<_, i32>(0);
+        let rank: f32 = row.get::<_, f32>(1);
         index_results
             .entry(OrderedFloat(rank))
             .or_default()
@@ -189,26 +196,25 @@ fn fuzz_select(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
     }
     index_results.pop_last();
 
-    client.update("SET enable_seqscan = on", None, &[]).unwrap();
+    client.execute("SET enable_seqscan = on", &[]).unwrap();
     client
-        .update("SET bm25_catalog.enable_index = off", None, &[])
+        .execute("SET bm25_catalog.enable_index = off", &[])
         .unwrap();
 
     let restuple = client
-        .select(
+        .query(
             r#"
-            SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', $1) AS rank
+            SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', $1::text::bm25vector) AS rank
             FROM documents
             ORDER BY rank
             LIMIT 100"#,
-            None,
-            &[query_vector_clone.into()],
+            &[&query_vector_clone],
         )
         .unwrap();
     let mut seq_results: BTreeMap<OrderedFloat, BTreeSet<i32>> = BTreeMap::new();
     for row in restuple {
-        let id: i32 = row.get(1).unwrap().unwrap();
-        let rank: f32 = row.get(2).unwrap().unwrap();
+        let id: i32 = row.get::<_, i32>(0);
+        let rank: f32 = row.get::<_, f32>(1);
         seq_results
             .entry(OrderedFloat(rank))
             .or_default()
@@ -236,15 +242,22 @@ fn fuzz_select(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
     }
 }
 
-fn fuzz_delete(client: &mut SpiClient<'_>, rng: &mut impl RngExt) {
+fn fuzz_delete(client: &mut postgres::Client, rng: &mut impl RngExt) {
     let id = rng.random_range(1..INIT_DOCUMENTS) as i32;
     client
-        .update(r#"DELETE FROM documents WHERE id = $1"#, None, &[id.into()])
+        .execute(r#"DELETE FROM documents WHERE id = $1"#, &[&id])
         .unwrap();
 }
 
-fn fuzz_vacuum(client: &mut SpiClient<'_>, _rng: &mut impl RngExt) {
+fn fuzz_vacuum(client: &mut postgres::Client, _rng: &mut impl RngExt) {
+    client.execute(r#"VACUUM FULL documents"#, &[]).unwrap();
+}
+
+fn main() {
+    let params = std::env::args().nth(1).unwrap();
+    let mut client = postgres::Client::connect(&params, postgres::tls::NoTls).unwrap();
     client
-        .update(r#"VACUUM FULL documents"#, None, &[])
+        .execute(r#"SET search_path = "$user", public, bm25_catalog"#, &[])
         .unwrap();
+    test(&mut client);
 }

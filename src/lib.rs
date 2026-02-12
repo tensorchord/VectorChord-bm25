@@ -28,9 +28,6 @@ pub mod segment;
 pub mod utils;
 pub mod weight;
 
-#[cfg(any(test, feature = "pg_test"))]
-pub mod tests;
-
 pgrx::pg_module_magic!(
     name = c"vchord_bm25",
     version = {
@@ -67,14 +64,3 @@ unsafe extern "C-unwind" fn _pg_init() {
 
 #[cfg(not(all(target_endian = "little", target_pointer_width = "64")))]
 compile_error!("Target is not supported.");
-
-#[cfg(test)]
-pub mod pg_test {
-    pub fn setup(_options: Vec<&str>) {
-        // perform one-off initialization when the pg_test framework starts
-    }
-
-    pub fn postgresql_conf_options() -> Vec<&'static str> {
-        vec![r#"search_path = '"$user", public, bm25_catalog'"#]
-    }
-}
