@@ -38,6 +38,61 @@ jobs:
       - name: Deny
         run: cargo deny check
 
+      - name: License Header
+        run: |
+          HEADER=$(cat <<EOF
+          This software is licensed under a dual license model:
+
+          GNU Affero General Public License v3 (AGPLv3): You may use, modify, and
+          distribute this software under the terms of the AGPLv3.
+
+          Elastic License v2 (ELv2): You may also use, modify, and distribute this
+          software under the Elastic License v2, which has specific restrictions.
+
+          We welcome any commercial collaboration or support. For inquiries
+          regarding the licenses, please contact us at:
+          vectorchord-inquiry@tensorchord.ai
+
+          Copyright (c) 2025 TensorChord Inc.
+          EOF
+          )
+          COUNT=$(echo "$HEADER" | wc -l)
+
+          RS_HEADER=$(echo "$HEADER" | awk '{ if ($0 ~ /^$/) print "//"; else print "// " $0 }')
+          C_HEADER=$(echo "$HEADER" | awk '{ if ($0 ~ /^$/) print "//"; else print "// " $0 }')
+          PY_HEADER=$(echo "$HEADER" | awk '{ if ($0 ~ /^$/) print "#"; else print "# " $0 }')
+
+          RS_FILES=$(find . -type f -name "*.rs" -not -path "./target/*")
+          C_FILES=$(find . -type f -name "*.c" -not -path "./target/*")
+          PY_FILES=$(find . -type f -name "*.py" -not -path "./target/*")
+
+          FLAG="0"
+
+          for p in $RS_FILES; do
+            if ! head -n "$COUNT" "$p" | cmp -s - <(echo "$RS_HEADER"); then
+              echo "license header mismatch in file $p"
+              FLAG="1"
+            fi
+          done
+
+          for p in $C_FILES; do
+            if ! head -n "$COUNT" "$p" | cmp -s - <(echo "$C_HEADER"); then
+              echo "license header mismatch in file $p"
+              FLAG="1"
+            fi
+          done
+
+          for p in $PY_FILES; do
+            if ! head -n "$COUNT" "$p" | cmp -s - <(echo "$PY_HEADER"); then
+              echo "license header mismatch in file $p"
+              FLAG="1"
+            fi
+          done
+
+          if [ "$FLAG" -eq "1" ]; then
+            exit 1
+          fi
+
 #      - name: SQL
 #        run: |
 #          ! grep -P '\t' -r ./sql

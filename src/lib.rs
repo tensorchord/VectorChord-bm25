@@ -1,3 +1,17 @@
+// This software is licensed under a dual license model:
+//
+// GNU Affero General Public License v3 (AGPLv3): You may use, modify, and
+// distribute this software under the terms of the AGPLv3.
+//
+// Elastic License v2 (ELv2): You may also use, modify, and distribute this
+// software under the Elastic License v2, which has specific restrictions.
+//
+// We welcome any commercial collaboration or support. For inquiries
+// regarding the licenses, please contact us at:
+// vectorchord-inquiry@tensorchord.ai
+//
+// Copyright (c) 2025 TensorChord Inc.
+
 #![allow(clippy::len_without_is_empty)]
 #![allow(clippy::manual_is_multiple_of)]
 #![allow(clippy::missing_safety_doc)]
@@ -53,33 +67,6 @@ unsafe extern "C-unwind" fn _pg_init() {
 
 #[cfg(not(all(target_endian = "little", target_pointer_width = "64")))]
 compile_error!("Target is not supported.");
-
-#[cfg(not(any(
-    feature = "pg13",
-    feature = "pg14",
-    feature = "pg15",
-    feature = "pg16",
-    feature = "pg17",
-    feature = "pg18"
-)))]
-compiler_error!("PostgreSQL version must be selected.");
-
-// const SCHEMA: &str = "bm25_catalog";
-
-// const SCHEMA_C_BYTES: [u8; SCHEMA.len() + 1] = {
-//     let mut bytes = [0u8; SCHEMA.len() + 1];
-//     let mut i = 0_usize;
-//     while i < SCHEMA.len() {
-//         bytes[i] = SCHEMA.as_bytes()[i];
-//         i += 1;
-//     }
-//     bytes
-// };
-
-// const SCHEMA_C_STR: &std::ffi::CStr = match std::ffi::CStr::from_bytes_with_nul(&SCHEMA_C_BYTES) {
-//     Ok(x) => x,
-//     Err(_) => panic!("there are null characters in schema"),
-// };
 
 #[cfg(test)]
 pub mod pg_test {
