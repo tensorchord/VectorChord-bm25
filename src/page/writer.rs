@@ -24,7 +24,8 @@ pub struct PageWriterInitFork {
 }
 
 impl PageWriterInitFork {
-    pub fn new(relation: pgrx::pg_sys::Relation, flag: PageFlags) -> Self {
+    #[allow(dead_code)]
+    pub unsafe fn new(relation: pgrx::pg_sys::Relation, flag: PageFlags) -> Self {
         Self {
             relation,
             flag,
@@ -33,31 +34,36 @@ impl PageWriterInitFork {
         }
     }
 
+    #[allow(dead_code)]
     pub fn finalize(self) -> pgrx::pg_sys::BlockNumber {
         self.first_blkno
     }
 
+    #[allow(dead_code)]
     fn change_page(&mut self) {
         let mut old_page = self.page.take().unwrap();
-        let new_page = page_alloc_init_forknum(self.relation, self.flag);
+        let new_page = unsafe { page_alloc_init_forknum(self.relation, self.flag) };
         old_page.opaque.next_blkno = new_page.blkno();
         self.page = Some(new_page);
     }
 
+    #[allow(dead_code)]
     fn offset(&mut self) -> &mut u16 {
         let page = self.page.as_mut().unwrap().deref_mut();
         &mut page.header.pd_lower
     }
 
+    #[allow(dead_code)]
     fn freespace_mut(&mut self) -> &mut [u8] {
         if self.page.is_none() {
-            let page = page_alloc_init_forknum(self.relation, self.flag);
+            let page = unsafe { page_alloc_init_forknum(self.relation, self.flag) };
             self.first_blkno = page.blkno();
             self.page = Some(page);
         }
         self.page.as_mut().unwrap().deref_mut().freespace_mut()
     }
 
+    #[allow(dead_code)]
     pub fn write(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let space = self.freespace_mut();
@@ -82,7 +88,11 @@ pub struct PageWriter {
 }
 
 impl PageWriter {
-    pub fn new(relation: pgrx::pg_sys::Relation, flag: PageFlags, skip_lock_rel: bool) -> Self {
+    pub unsafe fn new(
+        relation: pgrx::pg_sys::Relation,
+        flag: PageFlags,
+        skip_lock_rel: bool,
+    ) -> Self {
         Self {
             relation,
             flag,
@@ -92,12 +102,13 @@ impl PageWriter {
         }
     }
 
-    pub fn open(
+    #[allow(dead_code)]
+    pub unsafe fn open(
         relation: pgrx::pg_sys::Relation,
         last_blkno: pgrx::pg_sys::BlockNumber,
         skip_lock_rel: bool,
     ) -> Self {
-        let page = page_write(relation, last_blkno);
+        let page = unsafe { page_write(relation, last_blkno) };
         Self {
             relation,
             flag: page.opaque.page_flag,
@@ -119,7 +130,7 @@ impl PageWriter {
 
     fn change_page(&mut self) {
         let mut old_page = self.page.take().unwrap();
-        let new_page = page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+        let new_page = unsafe { page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel) };
         old_page.opaque.next_blkno = new_page.blkno();
         self.page = Some(new_page);
     }
@@ -131,7 +142,7 @@ impl PageWriter {
 
     fn freespace_mut(&mut self) -> &mut [u8] {
         if self.page.is_none() {
-            let page = page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel);
+            let page = unsafe { page_alloc_with_fsm(self.relation, self.flag, self.skip_lock_rel) };
             self.first_blkno = page.blkno();
             self.page = Some(page);
         }

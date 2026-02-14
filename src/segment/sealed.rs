@@ -26,25 +26,30 @@ pub struct SealedSegmentData {
     pub term_id_cnt: u32,
 }
 
+#[allow(dead_code)]
 pub struct SealedSegmentWriter {
     writer: InvertedWriter,
 }
 
 impl SealedSegmentWriter {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             writer: InvertedWriter::new(),
         }
     }
 
+    #[allow(dead_code)]
     pub fn insert(&mut self, doc_id: u32, vector: Bm25VectorBorrowed) {
         self.writer.insert(doc_id, vector);
     }
 
+    #[allow(dead_code)]
     pub fn finalize_insert(&mut self) {
         self.writer.finalize();
     }
 
+    #[allow(dead_code)]
     pub fn serialize<R: FieldNormRead>(&self, s: &mut InvertedSerializer<R>) {
         self.writer.serialize(s);
     }
@@ -57,8 +62,8 @@ pub struct SealedSegmentReader {
 }
 
 impl SealedSegmentReader {
-    pub fn new(index: pgrx::pg_sys::Relation, sealed_data: SealedSegmentData) -> Self {
-        let term_info_reader = PostingTermInfoReader::new(index, sealed_data);
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, sealed_data: SealedSegmentData) -> Self {
+        let term_info_reader = unsafe { PostingTermInfoReader::new(index, sealed_data) };
         Self {
             index,
             term_info_reader,
@@ -75,11 +80,11 @@ impl SealedSegmentReader {
         if term_info.meta_blkno == pgrx::pg_sys::InvalidBlockNumber {
             return None;
         }
-        Some(PostingCursor::new(self.index, term_info))
+        unsafe { Some(PostingCursor::new(self.index, term_info)) }
     }
 }
 
-pub fn extend_sealed_term_id(
+pub unsafe fn extend_sealed_term_id(
     index: pgrx::pg_sys::Relation,
     sealed_data: &mut SealedSegmentData,
     term_id_cnt: u32,
@@ -87,7 +92,8 @@ pub fn extend_sealed_term_id(
     if sealed_data.term_id_cnt >= term_id_cnt {
         return;
     }
-    let mut page_writer = VirtualPageWriter::open(index, sealed_data.term_info_blkno, false);
+    let mut page_writer =
+        unsafe { VirtualPageWriter::open(index, sealed_data.term_info_blkno, false) };
     for _ in sealed_data.term_id_cnt..term_id_cnt {
         page_writer.write(bytemuck::bytes_of(&PostingTermInfo::empty()));
     }

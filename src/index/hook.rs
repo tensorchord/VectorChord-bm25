@@ -93,7 +93,7 @@ unsafe extern "C-unwind" fn executor_start(
     }
 }
 
-pub fn init() {
+pub unsafe fn init() {
     unsafe {
         PREV_EXECUTOR_START = pgrx::pg_sys::ExecutorStart_hook;
         pgrx::pg_sys::ExecutorStart_hook = Some(executor_start);

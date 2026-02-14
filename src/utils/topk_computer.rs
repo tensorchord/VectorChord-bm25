@@ -50,6 +50,7 @@ impl TopKComputer {
     }
 
     // Return top-k elements in ascending order.
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_sorted_slice(&mut self) -> &[(f32, u32)] {
         if self.len > self.k {
             self.truncate_top_k();

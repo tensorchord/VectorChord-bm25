@@ -40,11 +40,11 @@ pub fn search_bm25query(
     let index =
         unsafe { pgrx::PgRelation::with_lock(index_oid, pgrx::pg_sys::AccessShareLock as _) };
     let meta = {
-        let page = page_read(index.as_ptr(), METAPAGE_BLKNO);
+        let page = unsafe { page_read(index.as_ptr(), METAPAGE_BLKNO) };
         unsafe { &*(page.data().as_ptr() as *const MetaPageData) }
     };
 
-    let term_stat_reader = TermStatReader::new(index.as_ptr(), meta);
+    let term_stat_reader = unsafe { TermStatReader::new(index.as_ptr(), meta) };
     let avgdl = meta.avgdl();
     let scores = bm25_score_batch(
         meta.doc_cnt,

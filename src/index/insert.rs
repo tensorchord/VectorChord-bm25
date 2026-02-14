@@ -149,33 +149,39 @@ unsafe fn aminsertinner(
     }
 }
 
-fn free_growing_segment(index: pgrx::pg_sys::Relation, segment: GrowingSegmentData) {
+unsafe fn free_growing_segment(index: pgrx::pg_sys::Relation, segment: GrowingSegmentData) {
     let mut blkno = segment.first_blkno.get();
     for _ in 0..segment.growing_full_page_count {
         assert!(blkno != pgrx::pg_sys::InvalidBlockNumber);
 
         let next_blkno;
         {
-            let page = page_read(index, blkno);
+            let page = unsafe { page_read(index, blkno) };
             let count = page_get_max_offset_number(&page);
             for i in 1..=count {
                 let item_id = page_get_item_id(&page, i);
                 if item_id.lp_flags() == pgrx::pg_sys::LP_REDIRECT {
-                    let first_blkno: &u32 = page_get_item(&page, item_id);
-                    free_page_list(index, *first_blkno);
+                    let first_blkno: &u32 = unsafe { page_get_item(&page, item_id) };
+                    unsafe {
+                        free_page_list(index, *first_blkno);
+                    }
                 }
             }
             next_blkno = page.opaque.next_blkno;
         }
-        page_free(index, blkno);
+        unsafe {
+            page_free(index, blkno);
+        }
         blkno = next_blkno;
     }
 }
 
-fn free_page_list(index: pgrx::pg_sys::Relation, mut blkno: pgrx::pg_sys::BlockNumber) {
+unsafe fn free_page_list(index: pgrx::pg_sys::Relation, mut blkno: pgrx::pg_sys::BlockNumber) {
     while blkno != pgrx::pg_sys::InvalidBlockNumber {
-        let next_blkno = page_read(index, blkno).opaque.next_blkno;
-        page_free(index, blkno);
+        let next_blkno = unsafe { page_read(index, blkno).opaque.next_blkno };
+        unsafe {
+            page_free(index, blkno);
+        }
         blkno = next_blkno;
     }
 }

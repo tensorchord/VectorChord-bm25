@@ -16,6 +16,7 @@ use crate::page::BM25_PAGE_SIZE;
 
 use super::{PageReadGuard, page_read, page_write};
 
+#[allow(dead_code)]
 pub struct ContinuousPageReader<T> {
     index: pgrx::pg_sys::Relation,
     start_blkno: pgrx::pg_sys::BlockNumber,
@@ -23,12 +24,17 @@ pub struct ContinuousPageReader<T> {
 }
 
 impl<T: Copy> ContinuousPageReader<T> {
+    #[allow(dead_code)]
     const PAGE_COUNT: u32 = {
         assert!(align_of::<T>() <= 8);
         (BM25_PAGE_SIZE / size_of::<T>()) as u32
     };
 
-    pub fn new(index: pgrx::pg_sys::Relation, start_blkno: pgrx::pg_sys::BlockNumber) -> Self {
+    #[allow(dead_code)]
+    pub unsafe fn new(
+        index: pgrx::pg_sys::Relation,
+        start_blkno: pgrx::pg_sys::BlockNumber,
+    ) -> Self {
         Self {
             index,
             start_blkno,
@@ -36,19 +42,21 @@ impl<T: Copy> ContinuousPageReader<T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn read(&self, idx: u32) -> T {
         let blkno_offset = idx / Self::PAGE_COUNT;
         let blkno = self.start_blkno + blkno_offset as pgrx::pg_sys::BlockNumber;
         let offset = (idx % Self::PAGE_COUNT) as usize;
-        let page = page_read(self.index, blkno);
+        let page = unsafe { page_read(self.index, blkno) };
         unsafe { page.data().as_ptr().cast::<T>().add(offset).read() }
     }
 
+    #[allow(dead_code)]
     pub fn update(&self, idx: u32, f: impl FnOnce(&mut T)) {
         let blkno_offset = idx / Self::PAGE_COUNT;
         let blkno = self.start_blkno + blkno_offset as pgrx::pg_sys::BlockNumber;
         let offset = (idx % Self::PAGE_COUNT) as usize;
-        let mut page = page_write(self.index, blkno);
+        let mut page = unsafe { page_write(self.index, blkno) };
         let data = page.data_mut();
         let ptr = unsafe { data.as_mut_ptr().cast::<T>().add(offset) };
         f(unsafe { &mut *ptr });
@@ -63,7 +71,7 @@ pub struct PageReader {
 }
 
 impl PageReader {
-    pub fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
         Self {
             index,
             blkno,
@@ -72,10 +80,12 @@ impl PageReader {
         }
     }
 
+    #[allow(dead_code)]
     pub fn blkno(&self) -> pgrx::pg_sys::BlockNumber {
         self.blkno
     }
 
+    #[allow(dead_code)]
     pub fn offset(&self) -> usize {
         self.offset
     }
@@ -88,7 +98,7 @@ impl std::io::Read for PageReader {
         }
         let inner = self
             .inner
-            .get_or_insert_with(|| page_read(self.index, self.blkno));
+            .get_or_insert_with(|| unsafe { page_read(self.index, self.blkno) });
 
         let data = &inner.data()[self.offset..];
         let to_read = std::cmp::min(buf.len(), data.len());
@@ -111,7 +121,7 @@ impl std::io::Read for PageReader {
         let mut inner = self
             .inner
             .take()
-            .unwrap_or_else(|| page_read(self.index, blkno));
+            .unwrap_or_else(|| unsafe { page_read(self.index, blkno) });
         let mut read_len = 0;
         loop {
             let data = &inner.data()[self.offset..];
@@ -122,7 +132,7 @@ impl std::io::Read for PageReader {
             if blkno == pgrx::pg_sys::InvalidBlockNumber {
                 break;
             } else {
-                inner = page_read(self.index, blkno);
+                inner = unsafe { page_read(self.index, blkno) };
             }
         }
 

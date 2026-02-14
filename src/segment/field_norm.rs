@@ -27,8 +27,8 @@ impl FieldNormWriter {
         self.buffer.push(fieldnorm_to_id(fieldnorm));
     }
 
-    pub fn serialize(&self, index: pgrx::pg_sys::Relation) -> pgrx::pg_sys::BlockNumber {
-        let mut pager = VirtualPageWriter::new(index, PageFlags::FIELD_NORM, true);
+    pub unsafe fn serialize(&self, index: pgrx::pg_sys::Relation) -> pgrx::pg_sys::BlockNumber {
+        let mut pager = unsafe { VirtualPageWriter::new(index, PageFlags::FIELD_NORM, true) };
         pager.write(&self.buffer);
         pager.finalize()
     }
@@ -53,8 +53,8 @@ impl FieldNormRead for FieldNormMemoryReader<'_> {
 pub struct FieldNormReader(VirtualPageReader);
 
 impl FieldNormReader {
-    pub fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
-        Self(VirtualPageReader::new(index, blkno))
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
+        unsafe { Self(VirtualPageReader::new(index, blkno)) }
     }
 }
 
@@ -337,4 +337,5 @@ pub const FIELD_NORMS_TABLE: [u32; 256] = [
     2_013_265_944,
 ];
 
+#[allow(dead_code)]
 pub const MAX_FIELD_NORM: u32 = 2_013_265_944;

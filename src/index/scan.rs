@@ -57,7 +57,7 @@ impl Scanner {
         }
     }
 
-    pub fn set_node(&mut self, node: *mut pgrx::pg_sys::IndexScanState) {
+    pub unsafe fn set_node(&mut self, node: *mut pgrx::pg_sys::IndexScanState) {
         let n = match self {
             Scanner::Initial { node: n } => n,
             Scanner::Waiting { node: n, .. } => n,
@@ -122,7 +122,7 @@ pub unsafe extern "C-unwind" fn amrescan(
 }
 
 #[pgrx::pg_guard]
-pub extern "C-unwind" fn amgettuple(
+pub unsafe extern "C-unwind" fn amgettuple(
     scan: pgrx::pg_sys::IndexScanDesc,
     direction: pgrx::pg_sys::ScanDirection::Type,
 ) -> bool {
@@ -138,7 +138,7 @@ pub extern "C-unwind" fn amgettuple(
             query_index,
             query_vector,
         } => {
-            let results = scan_main(*node, query_index.as_ptr(), query_vector.borrow());
+            let results = unsafe { scan_main(*node, query_index.as_ptr(), query_vector.borrow()) };
             *scanner = Scanner::Scanned {
                 node: *node,
                 results,
@@ -171,7 +171,7 @@ pub extern "C-unwind" fn amendscan(scan: pgrx::pg_sys::IndexScanDesc) {
 }
 
 // return top-k results
-fn scan_main(
+unsafe fn scan_main(
     scan_state: *mut pgrx::pg_sys::IndexScanState,
     index: pgrx::pg_sys::Relation,
     query_vector: Bm25VectorBorrowed,
@@ -181,19 +181,19 @@ fn scan_main(
         return Vec::new();
     }
     if limit == -1 {
-        return brute_force_scan(index, query_vector);
+        return unsafe { brute_force_scan(index, query_vector) };
     }
 
-    let page = page_read(index, METAPAGE_BLKNO);
-    let meta: &MetaPageData = page.as_ref();
+    let page = unsafe { page_read(index, METAPAGE_BLKNO) };
+    let meta: &MetaPageData = unsafe { page.as_ref() };
     let avgdl = meta.avgdl();
 
     let mut computer = TopKComputer::new(BM25_LIMIT.get() as _);
-    let delete_bitmap_reader = DeleteBitmapReader::new(index, meta.delete_bitmap_blkno);
+    let delete_bitmap_reader = unsafe { DeleteBitmapReader::new(index, meta.delete_bitmap_blkno) };
 
-    let term_stat_reader = TermStatReader::new(index, meta);
+    let term_stat_reader = unsafe { TermStatReader::new(index, meta) };
     if let Some(growing) = meta.growing_segment.as_ref() {
-        let reader = GrowingSegmentReader::new(index, growing);
+        let reader = unsafe { GrowingSegmentReader::new(index, growing) };
         let mut doc_id = meta.sealed_doc_id;
         let mut iter = reader.into_lending_iter(usize::MAX);
         while let Some(vector) = iter.next() {
@@ -206,8 +206,8 @@ fn scan_main(
         }
     }
 
-    let fieldnorm_reader = FieldNormReader::new(index, meta.field_norm_blkno);
-    let sealed_reader = SealedSegmentReader::new(index, meta.sealed_segment);
+    let fieldnorm_reader = unsafe { FieldNormReader::new(index, meta.field_norm_blkno) };
+    let sealed_reader = unsafe { SealedSegmentReader::new(index, meta.sealed_segment) };
     let scorers = query_vector
         .indexes()
         .iter()
@@ -226,7 +226,7 @@ fn scan_main(
         })
         .collect::<Vec<_>>();
 
-    let payload_reader = PayloadReader::new(index, meta.payload_blkno);
+    let payload_reader = unsafe { PayloadReader::new(index, meta.payload_blkno) };
 
     if ENABLE_PREFILTER.get() {
         let f = |doc_id| {
@@ -280,18 +280,21 @@ fn scan_main(
         .collect()
 }
 
-fn brute_force_scan(index: pgrx::pg_sys::Relation, query_vector: Bm25VectorBorrowed) -> Vec<u64> {
+unsafe fn brute_force_scan(
+    index: pgrx::pg_sys::Relation,
+    query_vector: Bm25VectorBorrowed,
+) -> Vec<u64> {
     let mut results = Vec::new();
 
-    let page = page_read(index, METAPAGE_BLKNO);
-    let meta: &MetaPageData = page.as_ref();
+    let page = unsafe { page_read(index, METAPAGE_BLKNO) };
+    let meta: &MetaPageData = unsafe { page.as_ref() };
     let avgdl = meta.avgdl();
 
-    let delete_bitmap_reader = DeleteBitmapReader::new(index, meta.delete_bitmap_blkno);
+    let delete_bitmap_reader = unsafe { DeleteBitmapReader::new(index, meta.delete_bitmap_blkno) };
 
-    let term_stat_reader = TermStatReader::new(index, meta);
+    let term_stat_reader = unsafe { TermStatReader::new(index, meta) };
     if let Some(growing) = meta.growing_segment.as_ref() {
-        let reader = GrowingSegmentReader::new(index, growing);
+        let reader = unsafe { GrowingSegmentReader::new(index, growing) };
         let mut doc_id = meta.sealed_doc_id;
         let mut iter = reader.into_lending_iter(usize::MAX);
         while let Some(vector) = iter.next() {
@@ -304,8 +307,8 @@ fn brute_force_scan(index: pgrx::pg_sys::Relation, query_vector: Bm25VectorBorro
         }
     }
 
-    let fieldnorm_reader = FieldNormReader::new(index, meta.field_norm_blkno);
-    let sealed_reader = SealedSegmentReader::new(index, meta.sealed_segment);
+    let fieldnorm_reader = unsafe { FieldNormReader::new(index, meta.field_norm_blkno) };
+    let sealed_reader = unsafe { SealedSegmentReader::new(index, meta.sealed_segment) };
 
     struct Cmp(f32, u32);
     impl PartialEq for Cmp {
@@ -363,7 +366,7 @@ fn brute_force_scan(index: pgrx::pg_sys::Relation, query_vector: Bm25VectorBorro
     }
 
     results.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-    let payload_reader = PayloadReader::new(index, meta.payload_blkno);
+    let payload_reader = unsafe { PayloadReader::new(index, meta.payload_blkno) };
     results
         .into_iter()
         .map(|(_, doc_id)| payload_reader.read(doc_id))

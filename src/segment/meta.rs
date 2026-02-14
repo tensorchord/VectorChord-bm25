@@ -19,6 +19,7 @@ pub const META_VERSION: u32 = 1;
 
 #[derive(Debug)]
 pub struct MetaPageData {
+    #[allow(dead_code)]
     pub version: u32,
     pub doc_cnt: u32,
     pub doc_term_cnt: u64,

@@ -40,14 +40,14 @@ pub struct InvertedSerializer<R: FieldNormRead> {
 }
 
 impl<R: FieldNormRead> InvertedSerializer<R> {
-    pub fn new(
+    pub unsafe fn new(
         index: pgrx::pg_sys::Relation,
         corpus_doc_cnt: u32,
         avgdl: f32,
         fieldnorm_reader: R,
     ) -> Self {
-        let postings_serializer = PostingSerializer::new(index);
-        let term_info_serializer = PostingTermInfoSerializer::new(index);
+        let postings_serializer = unsafe { PostingSerializer::new(index) };
+        let term_info_serializer = unsafe { PostingTermInfoSerializer::new(index) };
         Self {
             index,
             postings_serializer,
@@ -107,8 +107,8 @@ impl<R: FieldNormRead> InvertedWrite for InvertedSerializer<R> {
         assert!(block_count == partitions.len());
         self.block_partition.reset();
 
-        let mut term_meta_guard = page_alloc(self.index, PageFlags::TERM_META, true);
-        let term_meta: &mut PostingTermMetaData = term_meta_guard.init_mut();
+        let mut term_meta_guard = unsafe { page_alloc(self.index, PageFlags::TERM_META, true) };
+        let term_meta: &mut PostingTermMetaData = unsafe { term_meta_guard.init_mut() };
 
         let (unflushed_docids, unflushed_term_freqs) = self.postings_serializer.unflushed_data();
         let unfulled_doc_cnt = unflushed_docids.len();
@@ -135,7 +135,7 @@ struct PostingTermInfoSerializer {
 }
 
 impl PostingTermInfoSerializer {
-    pub fn new(index: pgrx::pg_sys::Relation) -> Self {
+    pub unsafe fn new(index: pgrx::pg_sys::Relation) -> Self {
         Self {
             index,
             term_infos: Vec::new(),
@@ -147,7 +147,7 @@ impl PostingTermInfoSerializer {
     }
 
     pub fn finalize(self) -> pgrx::pg_sys::BlockNumber {
-        let mut pager = VirtualPageWriter::new(self.index, PageFlags::TERM_INFO, true);
+        let mut pager = unsafe { VirtualPageWriter::new(self.index, PageFlags::TERM_INFO, true) };
         pager.write(bytemuck::cast_slice(&self.term_infos));
         pager.finalize()
     }
@@ -168,7 +168,7 @@ pub struct PostingSerializer {
 }
 
 impl PostingSerializer {
-    pub fn new(index: pgrx::pg_sys::Relation) -> Self {
+    pub unsafe fn new(index: pgrx::pg_sys::Relation) -> Self {
         Self {
             index,
             block_encode: BlockEncode::new(),
@@ -285,12 +285,15 @@ impl PostingSerializer {
         match (&mut self.skip_info_writer, &mut self.block_data_writer) {
             (Some(_), Some(_)) => {}
             (skip_info_writer @ None, block_data_writer @ None) => {
-                *skip_info_writer = Some(PageWriter::new(self.index, PageFlags::SKIP_INFO, true));
-                *block_data_writer = Some(VirtualPageWriter::new(
-                    self.index,
-                    PageFlags::BLOCK_DATA,
-                    true,
-                ));
+                *skip_info_writer =
+                    unsafe { Some(PageWriter::new(self.index, PageFlags::SKIP_INFO, true)) };
+                *block_data_writer = unsafe {
+                    Some(VirtualPageWriter::new(
+                        self.index,
+                        PageFlags::BLOCK_DATA,
+                        true,
+                    ))
+                };
             }
             _ => panic!("Inconsistent state: only one of the writers is None"),
         }

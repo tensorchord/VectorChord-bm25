@@ -42,7 +42,7 @@ pub struct GrowingSegmentReader {
 }
 
 impl GrowingSegmentReader {
-    pub fn new(index: pgrx::pg_sys::Relation, data: &GrowingSegmentData) -> Self {
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, data: &GrowingSegmentData) -> Self {
         Self {
             index,
             blkno: data.first_blkno.get(),
@@ -70,7 +70,7 @@ impl GrowingSegmentReader {
         }
 
         let GrowingSegmentReader { index, blkno } = self;
-        let page = page_read(index, blkno);
+        let page = unsafe { page_read(index, blkno) };
         let count = page_get_max_offset_number(&page);
         let state = TmpState {
             index,
@@ -92,7 +92,7 @@ impl GrowingSegmentReader {
                     state.page = None;
                     return None;
                 }
-                state.page = Some(page_read(state.index, state.blkno));
+                state.page = unsafe { Some(page_read(state.index, state.blkno)) };
                 state.offset = 1;
                 state.count = page_get_max_offset_number(state.page());
                 state.page_limit -= 1;
@@ -103,14 +103,14 @@ impl GrowingSegmentReader {
 
             if item_id.lp_flags() == pgrx::pg_sys::LP_REDIRECT {
                 state.redirect_data.clear();
-                let first_blkno: &u32 = page_get_item(state.page(), item_id);
-                let mut reader = PageReader::new(state.index, *first_blkno);
+                let first_blkno: &u32 = unsafe { page_get_item(state.page(), item_id) };
+                let mut reader = unsafe { PageReader::new(state.index, *first_blkno) };
                 reader.read_to_end(&mut state.redirect_data).unwrap();
                 let item: &Bm25VectorHeader = unsafe { &*state.redirect_data.as_ptr().cast() };
                 return Some(item.borrow());
             }
 
-            let item: &Bm25VectorHeader = page_get_item(state.page(), item_id);
+            let item: &Bm25VectorHeader = unsafe { page_get_item(state.page(), item_id) };
             Some(item.borrow())
         })
     }
@@ -125,7 +125,7 @@ pub struct SealingTask {
 /// - if growing segment is full, seal it
 ///
 /// return (first_blkno, growing_full_page_count) if growing segment is full
-pub fn growing_segment_insert(
+pub unsafe fn growing_segment_insert(
     index: pgrx::pg_sys::Relation,
     meta: &mut MetaPageData,
     bm25vector: &Bm25VectorInput,
@@ -135,7 +135,7 @@ pub fn growing_segment_insert(
     let mut redirect = false;
 
     if buf.len() > BM25_PAGE_SIZE - size_of::<pgrx::pg_sys::ItemIdData>() {
-        let mut writer = PageWriter::new(index, PageFlags::GROWING_REDIRECT, false);
+        let mut writer = unsafe { PageWriter::new(index, PageFlags::GROWING_REDIRECT, false) };
         writer.write(&buf);
         let first_blkno = writer.finalize();
         buf.clear();
@@ -144,7 +144,7 @@ pub fn growing_segment_insert(
     }
 
     let Some(growing_segment) = &mut meta.growing_segment else {
-        let mut page = page_alloc_with_fsm(index, PageFlags::GROWING, false);
+        let mut page = unsafe { page_alloc_with_fsm(index, PageFlags::GROWING, false) };
         meta.growing_segment = Some(GrowingSegmentData {
             first_blkno: NonZero::new(page.blkno()).unwrap(),
             last_blkno: page.blkno(),
@@ -155,9 +155,9 @@ pub fn growing_segment_insert(
         return None;
     };
 
-    let mut page = page_write(index, growing_segment.last_blkno);
+    let mut page = unsafe { page_write(index, growing_segment.last_blkno) };
     if !page_append_item(&mut page, &buf, redirect) {
-        let mut new_page = page_alloc_with_fsm(index, PageFlags::GROWING, false);
+        let mut new_page = unsafe { page_alloc_with_fsm(index, PageFlags::GROWING, false) };
         let success = page_append_item(&mut new_page, &buf, redirect);
         assert!(success);
         page.opaque.next_blkno = new_page.blkno();

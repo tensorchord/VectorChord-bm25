@@ -30,8 +30,8 @@ pub struct PostingTermInfoReader {
 }
 
 impl PostingTermInfoReader {
-    pub fn new(index: pgrx::pg_sys::Relation, sealed_data: SealedSegmentData) -> Self {
-        let page_reader = VirtualPageReader::new(index, sealed_data.term_info_blkno);
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, sealed_data: SealedSegmentData) -> Self {
+        let page_reader = unsafe { VirtualPageReader::new(index, sealed_data.term_info_blkno) };
         Self {
             page_reader,
             term_id_cnt: sealed_data.term_id_cnt,
@@ -86,16 +86,16 @@ pub struct PostingCursor {
 }
 
 impl PostingCursor {
-    pub fn new(index: pgrx::pg_sys::Relation, term_info: PostingTermInfo) -> Self {
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, term_info: PostingTermInfo) -> Self {
         let PostingTermInfo { meta_blkno } = term_info;
 
-        let term_meta_guard = page_read(index, meta_blkno);
+        let term_meta_guard = unsafe { page_read(index, meta_blkno) };
         let block_decode = BlockDecode::new();
-        let term_meta: &PostingTermMetaData = term_meta_guard.as_ref();
+        let term_meta: &PostingTermMetaData = unsafe { term_meta_guard.as_ref() };
         let block_page_reader = if term_meta.block_data_blkno == pgrx::pg_sys::InvalidBlockNumber {
             None
         } else {
-            Some(VirtualPageReader::new(index, term_meta.block_data_blkno))
+            unsafe { Some(VirtualPageReader::new(index, term_meta.block_data_blkno)) }
         };
         let remain_block_cnt = term_meta.block_count;
         let unfulled_skip_block = term_meta.unfulled_skip_block;
@@ -115,7 +115,7 @@ impl PostingCursor {
                 let mut skip_info_data = Vec::new();
                 while skip_info_page_id != pgrx::pg_sys::InvalidBlockNumber {
                     {
-                        let page = page_read(index, skip_info_page_id);
+                        let page = unsafe { page_read(index, skip_info_page_id) };
                         skip_info_data.clear();
                         skip_info_data.extend_from_slice(page.data());
                         skip_info_page_id = page.opaque.next_blkno;
@@ -260,13 +260,15 @@ impl PostingCursor {
         }
 
         let skip = &self.cur_skip_info;
-        let page = page_read(
-            self.index,
-            self.block_page_reader
-                .as_ref()
-                .unwrap()
-                .get_block_id(self.block_page_id),
-        );
+        let page = unsafe {
+            page_read(
+                self.index,
+                self.block_page_reader
+                    .as_ref()
+                    .unwrap()
+                    .get_block_id(self.block_page_id),
+            )
+        };
         self.block_decode.decode(
             &page.data()[self.page_offset as usize..][..skip.size as usize],
             NonZeroU32::new(self.decode_offset),

@@ -12,21 +12,16 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-#![allow(clippy::len_without_is_empty)]
-#![allow(clippy::manual_is_multiple_of)]
-#![allow(clippy::missing_safety_doc)]
-#![allow(clippy::new_without_default)]
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
 #![allow(unsafe_code)]
 
-pub mod algorithm;
-pub mod datatype;
-pub mod guc;
-pub mod index;
-pub mod page;
-pub mod segment;
-pub mod utils;
-pub mod weight;
+mod algorithm;
+mod datatype;
+mod guc;
+mod index;
+mod page;
+mod segment;
+mod utils;
+mod weight;
 
 pgrx::pg_module_magic!(
     name = c"vchord_bm25",
@@ -58,7 +53,9 @@ pgrx::extension_sql_file!("./sql/finalize.sql", finalize);
 #[pgrx::pg_guard]
 #[unsafe(export_name = "_PG_init")]
 unsafe extern "C-unwind" fn _pg_init() {
-    index::init();
+    unsafe {
+        index::init();
+    }
     guc::init();
 }
 

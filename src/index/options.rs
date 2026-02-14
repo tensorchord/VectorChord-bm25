@@ -62,7 +62,7 @@ pub extern "C-unwind" fn amoptions(
     rdopts as *mut pgrx::pg_sys::bytea
 }
 
-pub fn init() {
+pub unsafe fn init() {
     unsafe {
         RELOPT_KIND_BM25.set(pgrx::pg_sys::add_reloption_kind());
         pgrx::pg_sys::add_string_reloption(

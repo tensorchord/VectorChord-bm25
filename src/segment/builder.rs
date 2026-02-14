@@ -55,16 +55,18 @@ impl IndexBuilder {
     }
 
     // return (payload_blkno, field_norm_blkno, sealed_data)
-    pub fn serialize(&self, index: pgrx::pg_sys::Relation) -> (u32, u32, SealedSegmentData) {
-        let payload_blkno = self.payload_writer.serialize(index);
-        let field_norm_blkno = self.field_norm_writer.serialize(index);
+    pub unsafe fn serialize(&self, index: pgrx::pg_sys::Relation) -> (u32, u32, SealedSegmentData) {
+        let payload_blkno = unsafe { self.payload_writer.serialize(index) };
+        let field_norm_blkno = unsafe { self.field_norm_writer.serialize(index) };
 
-        let mut postings_serializer = InvertedSerializer::new(
-            index,
-            self.doc_cnt,
-            self.doc_term_cnt as f32 / self.doc_cnt as f32,
-            self.field_norm_writer.to_memory_reader(),
-        );
+        let mut postings_serializer = unsafe {
+            InvertedSerializer::new(
+                index,
+                self.doc_cnt,
+                self.doc_term_cnt as f32 / self.doc_cnt as f32,
+                self.field_norm_writer.to_memory_reader(),
+            )
+        };
         self.postings_writer.serialize(&mut postings_serializer);
         let term_info_blkno = postings_serializer.finalize();
         let term_id_cnt = self.postings_writer.term_id_cnt();

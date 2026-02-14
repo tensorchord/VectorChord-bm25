@@ -20,7 +20,9 @@ mod options;
 mod scan;
 mod vacuum;
 
-pub fn init() {
-    options::init();
-    hook::init();
+pub unsafe fn init() {
+    unsafe {
+        options::init();
+        hook::init();
+    }
 }

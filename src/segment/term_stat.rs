@@ -25,8 +25,8 @@ pub struct TermStatReader {
 }
 
 impl TermStatReader {
-    pub fn new(index: pgrx::pg_sys::Relation, meta: &MetaPageData) -> Self {
-        let page_reader = VirtualPageReader::new(index, meta.term_stat_blkno);
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, meta: &MetaPageData) -> Self {
+        let page_reader = unsafe { VirtualPageReader::new(index, meta.term_stat_blkno) };
         Self {
             page_reader,
             term_id_cnt: meta.term_id_cnt,
@@ -57,13 +57,17 @@ impl TermStatReader {
     }
 }
 
-pub fn extend_term_id(index: pgrx::pg_sys::Relation, meta: &mut MetaPageData, term_id_cnt: u32) {
+pub unsafe fn extend_term_id(
+    index: pgrx::pg_sys::Relation,
+    meta: &mut MetaPageData,
+    term_id_cnt: u32,
+) {
     let old_term_id_cnt = meta.term_id_cnt;
     if term_id_cnt <= old_term_id_cnt {
         return;
     }
 
-    let mut page_writer = VirtualPageWriter::open(index, meta.term_stat_blkno, false);
+    let mut page_writer = unsafe { VirtualPageWriter::open(index, meta.term_stat_blkno, false) };
     for _ in old_term_id_cnt..term_id_cnt {
         page_writer.write(&[0u8; size_of::<u32>()]);
     }

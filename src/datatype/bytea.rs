@@ -20,7 +20,7 @@ use pgrx::pgrx_sql_entity_graph::metadata::*;
 pub struct Bytea(*mut bytea);
 
 impl Bytea {
-    pub fn new(x: *mut bytea) -> Self {
+    pub unsafe fn new(x: *mut bytea) -> Self {
         Self(x)
     }
 }

@@ -19,8 +19,8 @@ use crate::page::{VirtualPageReader, VirtualPageWriter};
 pub struct DeleteBitmapReader(VirtualPageReader);
 
 impl DeleteBitmapReader {
-    pub fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
-        Self(VirtualPageReader::new(index, blkno))
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
+        unsafe { Self(VirtualPageReader::new(index, blkno)) }
     }
 
     pub fn is_delete(&self, doc_id: u32) -> bool {
@@ -36,13 +36,13 @@ impl DeleteBitmapReader {
     }
 }
 
-pub fn extend_delete_bit(
+pub unsafe fn extend_delete_bit(
     index: pgrx::pg_sys::Relation,
     blkno: pgrx::pg_sys::BlockNumber,
     doc_id: u32,
 ) {
     if doc_id.is_multiple_of(8) {
-        let mut writer = VirtualPageWriter::open(index, blkno, true);
+        let mut writer = unsafe { VirtualPageWriter::open(index, blkno, true) };
         writer.write(&[0]);
     }
 }

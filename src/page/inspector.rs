@@ -19,10 +19,10 @@ use super::{PageFlags, page_read};
 
 #[pgrx::pg_extern]
 fn bm25_page_inspect(index: pgrx::PgRelation, blkno: i32) -> String {
-    let page = page_read(index.as_ptr(), blkno.try_into().unwrap());
+    let page = unsafe { page_read(index.as_ptr(), blkno.try_into().unwrap()) };
     match page.opaque.page_flag {
         PageFlags::META => {
-            let meta_page: &MetaPageData = page.as_ref();
+            let meta_page: &MetaPageData = unsafe { page.as_ref() };
             format!("Meta Page:\n{:#?}", meta_page)
         }
         PageFlags::PAYLOAD => {
@@ -42,7 +42,7 @@ fn bm25_page_inspect(index: pgrx::PgRelation, blkno: i32) -> String {
             format!("Term Info Page ({} entries):\n{:?}", data.len(), data)
         }
         PageFlags::TERM_META => {
-            let term_meta: &PostingTermMetaData = page.as_ref();
+            let term_meta: &PostingTermMetaData = unsafe { page.as_ref() };
             format!("Term Meta Page:\n{:#?}", term_meta)
         }
         PageFlags::SKIP_INFO => {

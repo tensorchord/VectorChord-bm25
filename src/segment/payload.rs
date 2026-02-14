@@ -29,9 +29,9 @@ impl PayloadWriter {
         self.buffer.push(id);
     }
 
-    pub fn serialize(&self, index: pgrx::pg_sys::Relation) -> pgrx::pg_sys::BlockNumber {
+    pub unsafe fn serialize(&self, index: pgrx::pg_sys::Relation) -> pgrx::pg_sys::BlockNumber {
         let data = bytemuck::cast_slice(&self.buffer);
-        let mut pager = VirtualPageWriter::new(index, PageFlags::PAYLOAD, true);
+        let mut pager = unsafe { VirtualPageWriter::new(index, PageFlags::PAYLOAD, true) };
         pager.write(data);
         pager.finalize()
     }
@@ -40,8 +40,8 @@ impl PayloadWriter {
 pub struct PayloadReader(VirtualPageReader);
 
 impl PayloadReader {
-    pub fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
-        Self(VirtualPageReader::new(index, blkno))
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) -> Self {
+        unsafe { Self(VirtualPageReader::new(index, blkno)) }
     }
 
     pub fn read(&self, doc_id: u32) -> u64 {

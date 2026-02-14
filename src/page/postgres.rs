@@ -21,6 +21,7 @@ const _: () = {
     assert!(size_of::<PageData>() == pgrx::pg_sys::BLCKSZ as usize);
 };
 
+#[allow(dead_code)]
 pub const P_NEW: pgrx::pg_sys::BlockNumber = pgrx::pg_sys::InvalidBlockNumber;
 pub const METAPAGE_BLKNO: pgrx::pg_sys::BlockNumber = 0;
 pub const BM25_PAGE_ID: u16 = 0xFF88;
@@ -98,22 +99,17 @@ impl PageData {
         &mut self.content[lower_offset..]
     }
 
+    #[allow(dead_code)]
     pub fn as_pg_page(&self) -> pgrx::pg_sys::Page {
         self as *const _ as pgrx::pg_sys::Page
     }
-}
-
-impl<T> AsRef<T> for PageData {
-    fn as_ref(&self) -> &T {
+    pub unsafe fn as_ref<T>(&self) -> &T {
         const {
             assert!(size_of::<T>() <= BM25_PAGE_SIZE);
         }
         unsafe { &*(self.content.as_ptr() as *const T) }
     }
-}
-
-impl<T> AsMut<T> for PageData {
-    fn as_mut(&mut self) -> &mut T {
+    pub unsafe fn as_mut<T>(&mut self) -> &mut T {
         const {
             assert!(size_of::<T>() <= BM25_PAGE_SIZE);
         }
@@ -127,12 +123,13 @@ pub struct PageReadGuard {
 }
 
 impl PageReadGuard {
+    #[allow(dead_code)]
     pub fn blkno(&self) -> pgrx::pg_sys::BlockNumber {
         unsafe { pgrx::pg_sys::BufferGetBlockNumber(self.buf) }
     }
 
     // not guaranteed to be atomic
-    pub fn upgrade(self, relation: pgrx::pg_sys::Relation) -> PageWriteGuard {
+    pub unsafe fn upgrade(self, relation: pgrx::pg_sys::Relation) -> PageWriteGuard {
         unsafe {
             use pgrx::pg_sys::{
                 BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_UNLOCK, GENERIC_XLOG_FULL_IMAGE,
@@ -166,7 +163,7 @@ impl Drop for PageReadGuard {
     }
 }
 
-pub fn page_read(
+pub unsafe fn page_read(
     relation: pgrx::pg_sys::Relation,
     blkno: pgrx::pg_sys::BlockNumber,
 ) -> PageReadGuard {
@@ -201,6 +198,7 @@ impl PageWriteGuard {
     }
 
     // not guaranteed to be atomic
+    #[allow(dead_code)]
     pub fn degrade(self) -> PageReadGuard {
         unsafe {
             use pgrx::pg_sys::{BUFFER_LOCK_SHARE, BUFFER_LOCK_UNLOCK, BufferGetPage, LockBuffer};
@@ -215,7 +213,7 @@ impl PageWriteGuard {
         }
     }
 
-    pub fn init_mut<T: Default>(&mut self) -> &mut T {
+    pub unsafe fn init_mut<T: Default>(&mut self) -> &mut T {
         assert!(size_of::<T>() <= BM25_PAGE_SIZE);
         let ptr = self.content.as_mut_ptr() as *mut T;
         unsafe {
@@ -253,7 +251,7 @@ impl Drop for PageWriteGuard {
     }
 }
 
-pub fn page_write(
+pub unsafe fn page_write(
     relation: pgrx::pg_sys::Relation,
     blkno: pgrx::pg_sys::BlockNumber,
 ) -> PageWriteGuard {
@@ -279,7 +277,7 @@ pub fn page_write(
 }
 
 #[cfg(any(feature = "pg16", feature = "pg17", feature = "pg18"))]
-pub fn page_alloc(
+pub unsafe fn page_alloc(
     relation: pgrx::pg_sys::Relation,
     flag: PageFlags,
     skip_lock_rel: bool,
@@ -317,7 +315,7 @@ pub fn page_alloc(
 }
 
 #[cfg(any(feature = "pg14", feature = "pg15"))]
-pub fn page_alloc(
+pub unsafe fn page_alloc(
     relation: pgrx::pg_sys::Relation,
     flag: PageFlags,
     skip_lock_rel: bool,
@@ -349,7 +347,7 @@ pub fn page_alloc(
 }
 
 #[cfg(any(feature = "pg16", feature = "pg17", feature = "pg18"))]
-pub fn page_alloc_init_forknum(
+pub unsafe fn page_alloc_init_forknum(
     relation: pgrx::pg_sys::Relation,
     flag: PageFlags,
 ) -> PageWriteGuard {
@@ -383,7 +381,7 @@ pub fn page_alloc_init_forknum(
 }
 
 #[cfg(any(feature = "pg14", feature = "pg15"))]
-pub fn page_alloc_init_forknum(
+pub unsafe fn page_alloc_init_forknum(
     relation: pgrx::pg_sys::Relation,
     flag: PageFlags,
 ) -> PageWriteGuard {
@@ -412,7 +410,7 @@ pub fn page_alloc_init_forknum(
     }
 }
 
-pub fn page_alloc_with_fsm(
+pub unsafe fn page_alloc_with_fsm(
     index: pgrx::pg_sys::Relation,
     flag: PageFlags,
     skip_lock_rel: bool,
@@ -420,15 +418,15 @@ pub fn page_alloc_with_fsm(
     let blkno = unsafe { pgrx::pg_sys::GetFreeIndexPage(index) };
 
     if blkno == pgrx::pg_sys::InvalidBlockNumber {
-        page_alloc(index, flag, skip_lock_rel)
+        unsafe { page_alloc(index, flag, skip_lock_rel) }
     } else {
-        let mut page = page_write(index, blkno);
+        let mut page = unsafe { page_write(index, blkno) };
         PageData::init_mut(&mut page, flag);
         page
     }
 }
 
-pub fn page_free(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) {
+pub unsafe fn page_free(index: pgrx::pg_sys::Relation, blkno: pgrx::pg_sys::BlockNumber) {
     unsafe {
         pgrx::pg_sys::RecordFreeIndexPage(index, blkno);
     }
@@ -468,7 +466,7 @@ pub fn page_set_item_id_flag(
     item_id.set_lp_flags(flag.bits() as _);
 }
 
-pub fn page_get_item<T>(page: &PageData, item_id: pgrx::pg_sys::ItemIdData) -> &T {
+pub unsafe fn page_get_item<T>(page: &PageData, item_id: pgrx::pg_sys::ItemIdData) -> &T {
     unsafe {
         let offset = item_id.lp_off();
         let size = item_id.lp_len() as usize;

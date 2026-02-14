@@ -40,11 +40,11 @@ pub struct InvertedAppender {
 }
 
 impl InvertedAppender {
-    pub fn new(index: pgrx::pg_sys::Relation, meta: &MetaPageData) -> Self {
+    pub unsafe fn new(index: pgrx::pg_sys::Relation, meta: &MetaPageData) -> Self {
         let block_encode = BlockEncode::new();
-        let term_info_reader = PostingTermInfoReader::new(index, meta.sealed_segment);
-        let term_stat_reader = TermStatReader::new(index, meta);
-        let fieldnorm_reader = FieldNormReader::new(index, meta.field_norm_blkno);
+        let term_info_reader = unsafe { PostingTermInfoReader::new(index, meta.sealed_segment) };
+        let term_stat_reader = unsafe { TermStatReader::new(index, meta) };
+        let fieldnorm_reader = unsafe { FieldNormReader::new(index, meta.field_norm_blkno) };
         Self {
             index,
             block_encode,
@@ -87,7 +87,7 @@ impl InvertedWrite for InvertedAppender {
 
 impl InvertedAppender {
     fn write_new_term_id(&mut self, recorder: &TFRecorder, weight: Bm25Weight) {
-        let mut serializer = PostingSerializer::new(self.index);
+        let mut serializer = unsafe { PostingSerializer::new(self.index) };
         serializer.new_term();
 
         let mut block_count = 0;
@@ -115,8 +115,9 @@ impl InvertedAppender {
             }
         }
 
-        let mut term_meta_guard = page_alloc_with_fsm(self.index, PageFlags::TERM_META, true);
-        let term_meta: &mut PostingTermMetaData = term_meta_guard.init_mut();
+        let mut term_meta_guard =
+            unsafe { page_alloc_with_fsm(self.index, PageFlags::TERM_META, true) };
+        let term_meta: &mut PostingTermMetaData = unsafe { term_meta_guard.init_mut() };
 
         let (unflushed_docids, unflushed_term_freqs) = serializer.unflushed_data();
         let unfulled_doc_cnt = unflushed_docids.len();
@@ -144,8 +145,8 @@ impl InvertedAppender {
         weight: Bm25Weight,
         meta_blkno: pgrx::pg_sys::BlockNumber,
     ) {
-        let mut term_meta_guard = page_write(self.index, meta_blkno);
-        let term_meta: &mut PostingTermMetaData = term_meta_guard.as_mut();
+        let mut term_meta_guard = unsafe { page_write(self.index, meta_blkno) };
+        let term_meta: &mut PostingTermMetaData = unsafe { term_meta_guard.as_mut() };
 
         let mut block_count = term_meta.block_count;
         let mut last_full_block_last_docid = term_meta.last_full_block_last_docid;
@@ -188,8 +189,9 @@ impl InvertedAppender {
                 unfulled_doc_cnt = 0;
                 block_count += 1;
 
-                let block_data_writer =
-                    init_block_data_writer(self.index, &mut block_data_writer, term_meta);
+                let block_data_writer = unsafe {
+                    init_block_data_writer(self.index, &mut block_data_writer, term_meta)
+                };
                 let page_changed = block_data_writer.write_vectorized_no_cross(&[data]);
                 let mut flag = SkipBlockFlags::empty();
                 if page_changed {
@@ -203,7 +205,9 @@ impl InvertedAppender {
                     blockwand_fieldnorm_id,
                     flag,
                 };
-                append_skip_info(self.index, term_meta, skip_info);
+                unsafe {
+                    append_skip_info(self.index, term_meta, skip_info);
+                }
                 term_meta.unfulled_skip_block = None;
             }
         }
@@ -225,15 +229,15 @@ impl InvertedAppender {
     }
 }
 
-fn append_skip_info(
+unsafe fn append_skip_info(
     index: pgrx::pg_sys::Relation,
     term_meta: &mut PostingTermMetaData,
     skip_info: SkipBlock,
 ) {
     let mut guard = if term_meta.skip_info_last_blkno != pgrx::pg_sys::InvalidBlockNumber {
-        page_write(index, term_meta.skip_info_last_blkno)
+        unsafe { page_write(index, term_meta.skip_info_last_blkno) }
     } else {
-        let guard = page_alloc_with_fsm(index, PageFlags::SKIP_INFO, false);
+        let guard = unsafe { page_alloc_with_fsm(index, PageFlags::SKIP_INFO, false) };
         term_meta.skip_info_blkno = guard.blkno();
         term_meta.skip_info_last_blkno = guard.blkno();
         guard
@@ -241,7 +245,8 @@ fn append_skip_info(
 
     let mut freespace = guard.freespace_mut();
     if freespace.len() < size_of::<SkipBlock>() {
-        let new_skip_info_guard = page_alloc_with_fsm(index, PageFlags::SKIP_INFO, false);
+        let new_skip_info_guard =
+            unsafe { page_alloc_with_fsm(index, PageFlags::SKIP_INFO, false) };
         guard.opaque.next_blkno = new_skip_info_guard.blkno();
         term_meta.skip_info_last_blkno = new_skip_info_guard.blkno();
         guard = new_skip_info_guard;
@@ -251,18 +256,19 @@ fn append_skip_info(
     guard.header.pd_lower += size_of::<SkipBlock>() as u16;
 }
 
-fn init_block_data_writer<'a>(
+unsafe fn init_block_data_writer<'a>(
     index: pgrx::pg_sys::Relation,
     state: &'a mut Option<VirtualPageWriter>,
     term_meta: &mut PostingTermMetaData,
 ) -> &'a mut VirtualPageWriter {
     if state.is_none() {
         if term_meta.block_data_blkno == pgrx::pg_sys::InvalidBlockNumber {
-            let writer = VirtualPageWriter::new(index, PageFlags::BLOCK_DATA, false);
+            let writer = unsafe { VirtualPageWriter::new(index, PageFlags::BLOCK_DATA, false) };
             term_meta.block_data_blkno = writer.first_blkno();
             *state = Some(writer);
         } else {
-            let writer = VirtualPageWriter::open(index, term_meta.block_data_blkno, false);
+            let writer =
+                unsafe { VirtualPageWriter::open(index, term_meta.block_data_blkno, false) };
             *state = Some(writer);
         }
     }
