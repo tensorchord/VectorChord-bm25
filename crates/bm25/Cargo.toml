@@ -1,0 +1,16 @@
+[package]
+name = "bm25"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bitpacking = { version = "0.9.3", default-features = false, features = [
+    "bitpacker4x",
+] }
+
+[dev-dependencies]
+rand.workspace = true
+
+[lints]
+workspace = true

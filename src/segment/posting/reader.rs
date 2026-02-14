@@ -16,11 +16,11 @@ use std::num::NonZeroU32;
 
 use generator::{Gn, done};
 
-use crate::algorithm::block_encode::{BlockDecode, BlockDecodeTrait};
 use crate::page::{VirtualPageReader, page_read};
 use crate::segment::field_norm::id_to_fieldnorm;
 use crate::segment::sealed::SealedSegmentData;
 use crate::weight::Bm25Weight;
+use bm25::algorithm::block_encode::{BlockDecode, BlockDecodeTrait};
 
 use super::{PostingTermInfo, PostingTermMetaData, SkipBlock, SkipBlockFlags, TERMINATED_DOC};
 

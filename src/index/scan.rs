@@ -29,9 +29,9 @@ use crate::segment::meta::MetaPageData;
 use crate::segment::payload::PayloadReader;
 use crate::segment::sealed::SealedSegmentReader;
 use crate::segment::term_stat::TermStatReader;
-use crate::utils::loser_tree::LoserTree;
-use crate::utils::topk_computer::TopKComputer;
 use crate::weight::{Bm25Weight, bm25_score_batch, idf};
+use bm25::utils::loser_tree::LoserTree;
+use bm25::utils::topk_computer::TopKComputer;
 
 pub enum Scanner {
     Initial {

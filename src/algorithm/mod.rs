@@ -12,6 +12,4 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-pub mod block_encode;
-pub mod block_partition;
 pub mod block_wand;

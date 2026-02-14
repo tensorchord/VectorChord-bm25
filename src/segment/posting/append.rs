@@ -14,13 +14,13 @@
 
 use std::num::NonZeroU32;
 
-use crate::algorithm::block_encode::{BlockEncode, BlockEncodeTrait};
 use crate::page::{PageFlags, VirtualPageWriter, page_alloc_with_fsm, page_write};
 use crate::segment::field_norm::{FieldNormRead, FieldNormReader, id_to_fieldnorm};
 use crate::segment::meta::MetaPageData;
 use crate::segment::posting::{PostingTermInfo, PostingTermMetaData};
 use crate::segment::term_stat::TermStatReader;
 use crate::weight::{Bm25Weight, idf};
+use bm25::algorithm::block_encode::{BlockEncode, BlockEncodeTrait};
 
 use super::serializer::PostingSerializer;
 use super::writer::TFRecorder;

@@ -14,12 +14,12 @@
 
 use std::num::NonZeroU32;
 
-use crate::algorithm::block_encode::{BlockEncode, BlockEncodeTrait};
-use crate::algorithm::block_partition::{BlockPartition, BlockPartitionTrait};
 use crate::page::{PageFlags, PageWriter, VirtualPageWriter, page_alloc};
 use crate::segment::field_norm::{FieldNormRead, id_to_fieldnorm};
 use crate::segment::posting::SkipBlockFlags;
 use crate::weight::{Bm25Weight, idf};
+use bm25::algorithm::block_encode::{BlockEncode, BlockEncodeTrait};
+use bm25::algorithm::block_partition::{BlockPartition, BlockPartitionTrait};
 
 use super::writer::TFRecorder;
 use super::{PostingTermInfo, PostingTermMetaData, SkipBlock};

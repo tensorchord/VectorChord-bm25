@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use crate::datatype::Bm25VectorBorrowed;
-use crate::utils::vint;
+use bm25::utils::vint;
 
 use super::serializer::InvertedWrite;
 

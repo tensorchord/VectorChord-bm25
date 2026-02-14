@@ -20,6 +20,8 @@ pg17 = ["pgrx/pg17"]
 pg18 = ["pgrx/pg18"]
 
 [dependencies]
+bm25 = { path = "./crates/bm25" }
+
 arrayvec = "0.7.6"
 bitflags = "2.10.0"
 bitpacking = { version = "0.9.3", default-features = false, features = [

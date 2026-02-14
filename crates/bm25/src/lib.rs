@@ -12,4 +12,5 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-pub mod cells;
+pub mod algorithm;
+pub mod utils;

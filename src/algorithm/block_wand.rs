@@ -17,8 +17,8 @@ use generator::done;
 use crate::segment::delete::DeleteBitmapReader;
 use crate::segment::field_norm::{FieldNormRead, FieldNormReader, id_to_fieldnorm};
 use crate::segment::posting::{PostingCursor, TERMINATED_DOC};
-use crate::utils::topk_computer::TopKComputer;
 use crate::weight::Bm25Weight;
+use bm25::utils::topk_computer::TopKComputer;
 
 pub struct SealedScorer {
     pub posting: PostingCursor,
