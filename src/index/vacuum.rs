@@ -30,13 +30,15 @@ pub unsafe extern "C-unwind" fn ambulkdelete(
     callback: pgrx::pg_sys::IndexBulkDeleteCallback,
     callback_state: *mut std::os::raw::c_void,
 ) -> *mut pgrx::pg_sys::IndexBulkDeleteResult {
+    use pgrx::pg_sys::ffi::pg_guard_ffi_boundary;
     unsafe {
         let mut callback = {
             let callback = callback.unwrap();
             let mut item: pgrx::pg_sys::ItemPointerData = Default::default();
             move |p: u64| {
                 pgrx::itemptr::u64_to_item_pointer(p, &mut item);
-                callback(&mut item, callback_state)
+                #[allow(ffi_unwind_calls, reason = "protected by pg_guard_ffi_boundary")]
+                pg_guard_ffi_boundary(|| callback(&mut item, callback_state))
             }
         };
 

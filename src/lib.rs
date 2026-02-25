@@ -13,6 +13,7 @@
 // Copyright (c) 2025 TensorChord Inc.
 
 #![allow(unsafe_code)]
+#![deny(ffi_unwind_calls)]
 
 mod algorithm;
 mod datatype;

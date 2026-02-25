@@ -377,6 +377,7 @@ unsafe fn execute_boolean_qual(
     state: *mut pgrx::pg_sys::ExprState,
     econtext: *mut pgrx::pg_sys::ExprContext,
 ) -> bool {
+    use pgrx::pg_sys::ffi::pg_guard_ffi_boundary;
     unsafe {
         use pgrx::PgMemoryContexts;
         if state.is_null() {
@@ -385,8 +386,11 @@ unsafe fn execute_boolean_qual(
         assert!((*state).flags & pgrx::pg_sys::EEO_FLAG_IS_QUAL as u8 != 0);
         let mut is_null = true;
         pgrx::pg_sys::MemoryContextReset((*econtext).ecxt_per_tuple_memory);
-        let ret = PgMemoryContexts::For((*econtext).ecxt_per_tuple_memory)
-            .switch_to(|_| (*state).evalfunc.unwrap()(state, econtext, &mut is_null));
+        let ret = PgMemoryContexts::For((*econtext).ecxt_per_tuple_memory).switch_to(|_| {
+            let evalfunc = (*state).evalfunc.expect("no evalfunc for qual");
+            #[allow(ffi_unwind_calls, reason = "protected by pg_guard_ffi_boundary")]
+            pg_guard_ffi_boundary(|| evalfunc(state, econtext, &mut is_null))
+        });
         assert!(!is_null);
         bool::from_datum(ret, is_null).unwrap()
     }
@@ -410,6 +414,7 @@ unsafe fn check_mvcc(
     node: *mut pgrx::pg_sys::IndexScanState,
     p: pgrx::pg_sys::ItemPointer,
 ) -> bool {
+    use pgrx::pg_sys::ffi::pg_guard_ffi_boundary;
     unsafe {
         let scan_desc = (*node).iss_ScanDesc;
         let heap_fetch = (*scan_desc).xs_heapfetch;
@@ -420,26 +425,32 @@ unsafe fn check_mvcc(
         let mut all_dead = false;
         let slot = (*node).ss.ss_ScanTupleSlot;
         let mut heap_continue = false;
-        let found = index_fetch_tuple(
-            heap_fetch,
-            p,
-            snapshot,
-            slot,
-            &mut heap_continue,
-            &mut all_dead,
-        );
-        if found {
-            return true;
-        }
-        while heap_continue {
-            let found = index_fetch_tuple(
+        #[allow(ffi_unwind_calls, reason = "protected by pg_guard_ffi_boundary")]
+        let found = pg_guard_ffi_boundary(|| {
+            index_fetch_tuple(
                 heap_fetch,
                 p,
                 snapshot,
                 slot,
                 &mut heap_continue,
                 &mut all_dead,
-            );
+            )
+        });
+        if found {
+            return true;
+        }
+        while heap_continue {
+            #[allow(ffi_unwind_calls, reason = "protected by pg_guard_ffi_boundary")]
+            let found = pg_guard_ffi_boundary(|| {
+                index_fetch_tuple(
+                    heap_fetch,
+                    p,
+                    snapshot,
+                    slot,
+                    &mut heap_continue,
+                    &mut all_dead,
+                )
+            });
             if found {
                 return true;
             }
