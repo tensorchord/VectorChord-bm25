@@ -3,4 +3,3 @@ default_version = '0.0.0'
 module_pathname = 'vchord_bm25'
 relocatable = false
 superuser = true
-schema = 'bm25_catalog'

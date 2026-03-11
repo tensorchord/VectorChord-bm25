@@ -12,5 +12,42 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-pub mod algorithm;
-pub mod utils;
+mod build;
+mod compression;
+mod evaluate;
+mod guide;
+mod search;
+mod tape;
+mod tuples;
+
+pub mod types;
+pub mod vector;
+
+use index::tuples::Padding;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+#[repr(C, align(8))]
+#[derive(Debug, Clone, Copy, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct Opaque {
+    pub next: u32,
+    _padding_0: [Padding; 4],
+}
+
+#[allow(unsafe_code)]
+unsafe impl index::relation::Opaque for Opaque {}
+
+pub use build::{Segment, build};
+pub use evaluate::evaluate;
+pub use search::search;
+
+fn idf(number_of_documents: u32, token_number_of_documents: u32) -> f64 {
+    let number_of_documents = number_of_documents as f64;
+    let token_number_of_documents = token_number_of_documents as f64;
+    ((number_of_documents + 1.0) / (token_number_of_documents + 0.5)).ln()
+}
+
+fn tf(k1: f64, b: f64, avgdl: f64, document_length: u32, term_frequency: u32) -> f64 {
+    let term_frequency = term_frequency as f64;
+    let document_length = document_length as f64;
+    (term_frequency * (k1 + 1.0)) / (term_frequency + k1 * (1.0 - b + b * document_length / avgdl))
+}

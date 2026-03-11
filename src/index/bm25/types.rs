@@ -12,7 +12,21 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-mod binary_bm25vector;
-mod casts_bm25vector;
-pub mod memory_bm25vector;
-mod text_bm25vector;
+use bm25::types::Bm25IndexOptions;
+use serde::{Deserialize, Serialize};
+use validator::Validate;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct Bm25BuildOptions {}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct Bm25IndexingOptions {
+    #[serde(flatten)]
+    #[validate(nested)]
+    pub index: Bm25IndexOptions,
+    #[serde(default)]
+    #[validate(nested)]
+    pub build: Bm25BuildOptions,
+}

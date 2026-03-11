@@ -17,9 +17,7 @@ unsafe extern "C-unwind" fn rewrite_plan_state(
     node: *mut pgrx::pg_sys::PlanState,
     context: *mut core::ffi::c_void,
 ) -> bool {
-    unsafe fn dirty_check_vchord_bm25(
-        index_relation: *mut pgrx::pg_sys::RelationData,
-    ) -> Option<bool> {
+    unsafe fn dirty_check_bm25(index_relation: *mut pgrx::pg_sys::RelationData) -> Option<bool> {
         type FnPtr = unsafe extern "C-unwind" fn(
             *mut pgrx::pg_sys::RelationData,
             i32,
@@ -31,7 +29,7 @@ unsafe extern "C-unwind" fn rewrite_plan_state(
             let ambeginscan = indam.ambeginscan.as_ref()?;
             Some(core::ptr::fn_addr_eq::<FnPtr, FnPtr>(
                 *ambeginscan,
-                crate::index::scan::ambeginscan,
+                crate::index::bm25::am::ambeginscan,
             ))
         }
     }
@@ -40,32 +38,32 @@ unsafe extern "C-unwind" fn rewrite_plan_state(
         if (*node).type_ == pgrx::pg_sys::NodeTag::T_IndexScanState {
             let node = node as *mut pgrx::pg_sys::IndexScanState;
             let index_relation = (*node).iss_RelationDesc;
-            if (*node).iss_ScanDesc.is_null()
-                && dirty_check_vchord_bm25(index_relation) == Some(true)
-            {
-                use crate::index::scan::Scanner;
+            if (*node).iss_ScanDesc.is_null() {
+                if Some(true) == dirty_check_bm25(index_relation) {
+                    use crate::index::bm25::am::Scanner;
 
-                (*node).iss_ScanDesc = pgrx::pg_sys::index_beginscan(
-                    (*node).ss.ss_currentRelation,
-                    (*node).iss_RelationDesc,
-                    (*(*node).ss.ps.state).es_snapshot,
-                    #[cfg(feature = "pg18")]
-                    std::ptr::null_mut(),
-                    (*node).iss_NumScanKeys,
-                    (*node).iss_NumOrderByKeys,
-                );
-
-                let scanner = &mut *((*(*node).iss_ScanDesc).opaque as *mut Scanner);
-                scanner.set_node(node);
-
-                if (*node).iss_NumRuntimeKeys == 0 || (*node).iss_RuntimeKeysReady {
-                    pgrx::pg_sys::index_rescan(
-                        (*node).iss_ScanDesc,
-                        (*node).iss_ScanKeys,
+                    (*node).iss_ScanDesc = pgrx::pg_sys::index_beginscan(
+                        (*node).ss.ss_currentRelation,
+                        (*node).iss_RelationDesc,
+                        (*(*node).ss.ps.state).es_snapshot,
+                        #[cfg(feature = "pg18")]
+                        std::ptr::null_mut(),
                         (*node).iss_NumScanKeys,
-                        (*node).iss_OrderByKeys,
                         (*node).iss_NumOrderByKeys,
                     );
+
+                    let scanner = &mut *((*(*node).iss_ScanDesc).opaque as *mut Scanner);
+                    scanner.hack = std::ptr::NonNull::new(node);
+
+                    if (*node).iss_NumRuntimeKeys == 0 || (*node).iss_RuntimeKeysReady {
+                        pgrx::pg_sys::index_rescan(
+                            (*node).iss_ScanDesc,
+                            (*node).iss_ScanKeys,
+                            (*node).iss_NumScanKeys,
+                            (*node).iss_OrderByKeys,
+                            (*node).iss_NumOrderByKeys,
+                        );
+                    }
                 }
             }
         }
@@ -93,7 +91,8 @@ unsafe extern "C-unwind" fn executor_start(
     }
 }
 
-pub unsafe fn init() {
+pub fn init() {
+    assert!(crate::is_main());
     unsafe {
         PREV_EXECUTOR_START = pgrx::pg_sys::ExecutorStart_hook;
         pgrx::pg_sys::ExecutorStart_hook = Some(executor_start);

@@ -22,20 +22,18 @@ pg18 = ["pgrx/pg18"]
 [dependencies]
 bm25 = { path = "./crates/bm25" }
 
-arrayvec = "0.7.6"
-bitflags = "2.10.0"
-bitpacking = { version = "0.9.3", default-features = false, features = [
-    "bitpacker4x",
-] }
-bytemuck = "1.25.0"
-generator = "0.8.8"
-lending-iterator = "0.1.7"
+always_equal.workspace = true
+bumpalo = "3.20.2"
+index.workspace = true
+ordered-float.workspace = true
 pgrx = "=0.17.0"
+pgrx-catalog = "0.3.2"
 serde.workspace = true
-thiserror = "2.0.18"
+toml = "1.0.6"
+validator.workspace = true
 
-[dev-dependencies]
-rand.workspace = true
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "linux", target_os = "macos")))'.dependencies]
+mimalloc = { version = "0.1.48", features = ["local_dynamic_tls"] }
 
 [lints]
 workspace = true
@@ -49,12 +47,22 @@ version = "0.0.0"
 edition = "2024"
 
 [workspace.dependencies]
+always_equal = { git = "https://github.com/tensorchord/VectorChord.git" }
+index = { git = "https://github.com/tensorchord/VectorChord.git" }
+ordered-float = { version = "5.1.0", default-features = false }
 rand = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
+validator = { version = "0.20.0", features = ["derive"] }
+zerocopy = { version = "0.8.42", features = ["derive"] }
 
 [workspace.lints]
 # complexity
+clippy.manual_is_multiple_of = "allow"
 clippy.too_many_arguments = "allow"
+clippy.type_complexity = "allow"
+# style
+clippy.collapsible_if = "allow"
+clippy.needless_range_loop = "allow"
 # unsafe
 rust.unsafe_code = "deny"
 rust.unsafe_op_in_unsafe_fn = "deny"

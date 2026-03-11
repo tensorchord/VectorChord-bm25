@@ -12,7 +12,14 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-mod binary_bm25vector;
-mod casts_bm25vector;
-pub mod memory_bm25vector;
-mod text_bm25vector;
+mod default;
+
+pub use default::DefaultBuilder;
+
+// todo(usamoi): add a fallback scanner
+
+#[derive(Debug)]
+pub struct SearchOptions {
+    pub limit: u32,
+    pub prefilter: bool,
+}

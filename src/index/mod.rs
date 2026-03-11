@@ -12,17 +12,17 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-mod am;
-mod build;
+mod bm25;
+mod fetcher;
+mod gucs;
 mod hook;
-mod insert;
-mod options;
-mod scan;
-mod vacuum;
+mod operators;
+mod scanners;
+mod storage;
+mod traverse;
 
-pub unsafe fn init() {
-    unsafe {
-        options::init();
-        hook::init();
-    }
+pub fn init() {
+    gucs::init();
+    hook::init();
+    bm25::am::init();
 }

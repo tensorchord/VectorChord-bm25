@@ -6,31 +6,6 @@ CREATE TABLE documents (
 );
 
 statement ok
-SELECT tokenizer_catalog.create_text_analyzer('text_analyzer1', $$
-pre_tokenizer = "unicode_segmentation"
-[[character_filters]]
-to_lowercase = {}
-[[character_filters]]
-unicode_normalization = "nfkd"
-[[token_filters]]
-skip_non_alphanumeric = {}
-[[token_filters]]
-stopwords = "nltk_english"
-[[token_filters]]
-stemmer = "english_porter2"
-$$);
-
-statement ok
-SELECT tokenizer_catalog.create_custom_model_tokenizer_and_trigger(
-    tokenizer_name => 'tokenizer1',
-    model_name => 'model1',
-    text_analyzer_name => 'text_analyzer1',
-    table_name => 'documents',
-    source_column => 'passage',
-    target_column => 'embedding'
-);
-
-statement ok
 INSERT INTO documents (passage) VALUES 
 ('PostgreSQL is a powerful, open-source object-relational database system. It has over 15 years of active development.'),
 ('Full-text search is a technique for searching in plain-text documents or textual database fields. PostgreSQL supports this with tsvector.'),
@@ -44,6 +19,14 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
+SELECT tokenizer_catalog.create_tokenizer('tokenizer_bert', $$
+model = "bert_base_uncased"
+$$);
+
+statement ok
+UPDATE documents SET embedding = tokenizer_catalog.tokenize(passage, 'tokenizer_bert');
+
+statement ok
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
 statement ok
@@ -52,20 +35,21 @@ SET enable_seqscan = off;
 statement ok
 SET "bm25.limit" = 10;
 
-statement ok
+query I
 SELECT id
 FROM documents
-ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('PostgreSQL', 'tokenizer1')::bm25vector)
+ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert')::bm25vector)
 LIMIT 10;
+----
+8
+9
+4
+1
+7
+2
 
 statement ok
-SELECT tokenizer_catalog.drop_tokenizer('tokenizer1');
-
-statement ok
-SELECT tokenizer_catalog.drop_text_analyzer('text_analyzer1');
-
-statement ok
-SELECT tokenizer_catalog.drop_custom_model('model1');
+SELECT tokenizer_catalog.drop_tokenizer('tokenizer_bert');
 
 statement ok
 DROP TABLE documents;

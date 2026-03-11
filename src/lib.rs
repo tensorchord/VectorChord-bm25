@@ -15,14 +15,8 @@
 #![allow(unsafe_code)]
 #![deny(ffi_unwind_calls)]
 
-mod algorithm;
 mod datatype;
-mod guc;
 mod index;
-mod page;
-mod segment;
-mod utils;
-mod weight;
 
 pgrx::pg_module_magic!(
     name = c"vchord_bm25",
@@ -54,11 +48,30 @@ pgrx::extension_sql_file!("./sql/finalize.sql", finalize);
 #[pgrx::pg_guard]
 #[unsafe(export_name = "_PG_init")]
 unsafe extern "C-unwind" fn _pg_init() {
+    IS_MAIN.set(true);
+    index::init();
     unsafe {
-        index::init();
+        #[cfg(feature = "pg14")]
+        pgrx::pg_sys::EmitWarningsOnPlaceholders(c"vchord_bm25".as_ptr());
+        #[cfg(any(feature = "pg15", feature = "pg16", feature = "pg17", feature = "pg18"))]
+        pgrx::pg_sys::MarkGUCPrefixReserved(c"vchord_bm25".as_ptr());
     }
-    guc::init();
 }
 
-#[cfg(not(all(target_endian = "little", target_pointer_width = "64")))]
-compile_error!("Target is not supported.");
+std::thread_local! {
+    static IS_MAIN: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+#[must_use]
+fn is_main() -> bool {
+    IS_MAIN.get()
+}
+
+#[cfg(not(panic = "unwind"))]
+compile_error!("This crate must be compiled with `-Cpanic=unwind`.");
+
+#[cfg(not(miri))]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;

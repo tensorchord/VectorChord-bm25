@@ -5,12 +5,15 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+always_equal.workspace = true
 bitpacking = { version = "0.9.3", default-features = false, features = [
     "bitpacker4x",
 ] }
-
-[dev-dependencies]
-rand.workspace = true
+index.workspace = true
+ordered-float.workspace = true
+serde.workspace = true
+validator.workspace = true
+zerocopy.workspace = true
 
 [lints]
 workspace = true

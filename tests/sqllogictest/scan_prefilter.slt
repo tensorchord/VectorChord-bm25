@@ -2,32 +2,8 @@ statement ok
 CREATE TABLE documents (
     id SERIAL PRIMARY KEY,
     passage TEXT,
-    embedding bm25vector
-);
-
-statement ok
-SELECT tokenizer_catalog.create_text_analyzer('text_analyzer1', $$
-pre_tokenizer = "unicode_segmentation"
-[[character_filters]]
-to_lowercase = {}
-[[character_filters]]
-unicode_normalization = "nfkd"
-[[token_filters]]
-skip_non_alphanumeric = {}
-[[token_filters]]
-stopwords = "nltk_english"
-[[token_filters]]
-stemmer = "english_porter2"
-$$);
-
-statement ok
-SELECT tokenizer_catalog.create_custom_model_tokenizer_and_trigger(
-    tokenizer_name => 'tokenizer1',
-    model_name => 'model1',
-    text_analyzer_name => 'text_analyzer1',
-    table_name => 'documents',
-    source_column => 'passage',
-    target_column => 'embedding'
+    embedding bm25vector,
+    condition BOOLEAN DEFAULT FALSE
 );
 
 statement ok
@@ -44,28 +20,54 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
+SELECT tokenizer_catalog.create_tokenizer('tokenizer_bert', $$
+model = "bert_base_uncased"
+$$);
+
+statement ok
+UPDATE documents SET embedding = tokenizer_catalog.tokenize(passage, 'tokenizer_bert');
+
+statement ok
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
 statement ok
 SET enable_seqscan = off;
 
 statement ok
-SET "bm25.limit" = 10;
+SET "bm25.limit" = 3;
 
 statement ok
-SELECT id
-FROM documents
-ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('PostgreSQL', 'tokenizer1')::bm25vector)
-LIMIT 10;
+UPDATE documents SET condition = True WHERE id % 2 = 0;
+
+query I
+WITH results AS (
+  SELECT id
+  FROM documents
+  WHERE condition = TRUE
+  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert')::bm25vector)
+  LIMIT 10
+)
+SELECT COUNT(1) FROM results;
+----
+2
 
 statement ok
-SELECT tokenizer_catalog.drop_tokenizer('tokenizer1');
+SET bm25.prefilter = on;
+
+query I
+WITH results AS (
+  SELECT id
+  FROM documents
+  WHERE condition = TRUE
+  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert')::bm25vector)
+  LIMIT 10
+)
+SELECT COUNT(1) FROM results;
+----
+3
 
 statement ok
-SELECT tokenizer_catalog.drop_text_analyzer('text_analyzer1');
-
-statement ok
-SELECT tokenizer_catalog.drop_custom_model('model1');
+SELECT tokenizer_catalog.drop_tokenizer('tokenizer_bert');
 
 statement ok
 DROP TABLE documents;

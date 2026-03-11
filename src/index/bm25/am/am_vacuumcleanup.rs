@@ -12,7 +12,10 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-mod binary_bm25vector;
-mod casts_bm25vector;
-pub mod memory_bm25vector;
-mod text_bm25vector;
+#[pgrx::pg_guard]
+pub unsafe extern "C-unwind" fn amvacuumcleanup(
+    _info: *mut pgrx::pg_sys::IndexVacuumInfo,
+    _stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
+) -> *mut pgrx::pg_sys::IndexBulkDeleteResult {
+    unimplemented!()
+}

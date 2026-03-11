@@ -94,14 +94,14 @@ CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_op
 Now we can calculate the BM25 score between the query and the vectors. Note that the BM25 score in VectorChord-BM25 is negative, which means the more negative the score, the more relevant the document is. We intentionally make it negative so that you can use the default order by to get the most relevant documents first.
 
 ```sql
--- to_bm25query(index_name, query, tokenizer_name)
+-- bm25query(index_name, query, tokenizer_name)
 -- <&> is the operator to compute the bm25 score
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'bert')) AS bm25_score FROM documents;
+SELECT id, passage, embedding <&> bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'bert')) AS bm25_score FROM documents;
 ```
 
 And you can use the order by to utilize the index to get the most relevant documents first and faster.
 ```sql
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'bert')) AS rank
+SELECT id, passage, embedding <&> bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'bert')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -163,7 +163,7 @@ INSERT INTO documents (passage) VALUES
 
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
+SELECT id, passage, embedding <&> bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -217,7 +217,7 @@ INSERT INTO documents (passage) VALUES
 
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('人', 'tokenizer1')) AS rank
+SELECT id, passage, embedding <&> bm25query('documents_embedding_bm25', tokenize('人', 'tokenizer1')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -335,7 +335,7 @@ UPDATE documents SET embedding = tokenize(passage, 'lindera_ipadic');
 
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('書生', 'lindera_ipadic')) AS rank
+SELECT id, passage, embedding <&> bm25query('documents_embedding_bm25', tokenize('書生', 'lindera_ipadic')) AS rank
 FROM documents
 ORDER BY rank
 LIMIT 10;
@@ -447,7 +447,7 @@ In contrast, Vectorchord-bm25 focuses exclusively on BM25 ranking within Postgre
 
 ### Functions
 
-- `to_bm25query(index_name regclass, query_vector bm25vector) RETURNS bm25query`: Convert the input text into a BM25 query.
+- `bm25query(regclass, bm25vector) RETURNS bm25query`: Convert the input text into a BM25 query.
 
 ### Operators
 

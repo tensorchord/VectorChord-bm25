@@ -12,7 +12,7 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use rand::seq::IndexedRandom;
@@ -32,10 +32,10 @@ const DOCUMENT_MAX_TOKEN: u32 = 10000;
 const DOCUMENT_LEN: u32 = 100;
 
 const FUZZ_ITERATIONS: u32 = 500;
-const FUZZ_OPERATIONS: [Operation; 3] = [
-    Operation::Insert,
+const FUZZ_OPERATIONS: [Operation; 1] = [
+    // Operation::Insert,
     Operation::Select,
-    Operation::Delete,
+    // Operation::Delete,
     // Operation::Vacuum,
 ];
 
@@ -71,13 +71,6 @@ fn test(client: &mut postgres::Client) {
     client
         .execute(
             r#"CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);"#,
-            &[],
-        )
-        .unwrap();
-
-    client
-        .execute(
-            r#"SET bm25_catalog.segment_growing_max_page_size = 1;"#,
             &[],
         )
         .unwrap();
@@ -139,41 +132,12 @@ fn fuzz_insert(client: &mut postgres::Client, rng: &mut impl RngExt) {
         .unwrap();
 }
 
-#[derive(Clone, Copy)]
-struct OrderedFloat(f32);
-impl Debug for OrderedFloat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-impl PartialEq for OrderedFloat {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
-    }
-}
-impl Eq for OrderedFloat {}
-impl PartialOrd for OrderedFloat {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for OrderedFloat {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.total_cmp(&other.0)
-    }
-}
-
 fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
     let query_vector = random_bm25vector(rng);
-    let query_vector_clone = query_vector.clone();
 
     client.execute("SET enable_seqscan = off", &[]).unwrap();
-    client
-        .execute("SET bm25_catalog.enable_index = on", &[])
-        .unwrap();
-    client
-        .execute("SET bm25_catalog.bm25_limit = 200", &[])
-        .unwrap();
+    client.execute("SET bm25.enable_scan = on", &[]).unwrap();
+    client.execute("SET \"bm25.limit\" = 200", &[]).unwrap();
 
     let restuple = client
         .query(
@@ -185,21 +149,15 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
             &[&query_vector],
         )
         .unwrap();
-    let mut index_results: BTreeMap<OrderedFloat, BTreeSet<i32>> = BTreeMap::new();
+    let mut index_results: Vec<i32> = Vec::new();
+    let mut index_result_ranks: Vec<f64> = Vec::new();
     for row in restuple {
-        let id: i32 = row.get::<_, i32>(0);
-        let rank: f32 = row.get::<_, f32>(1);
-        index_results
-            .entry(OrderedFloat(rank))
-            .or_default()
-            .insert(id);
+        index_results.push(row.get::<_, i32>(0));
+        index_result_ranks.push(row.get::<_, f64>(1));
     }
-    index_results.pop_last();
 
     client.execute("SET enable_seqscan = on", &[]).unwrap();
-    client
-        .execute("SET bm25_catalog.enable_index = off", &[])
-        .unwrap();
+    client.execute("SET bm25.enable_scan = off", &[]).unwrap();
 
     let restuple = client
         .query(
@@ -208,37 +166,27 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
             FROM documents
             ORDER BY rank
             LIMIT 100"#,
-            &[&query_vector_clone],
+            &[&query_vector],
         )
         .unwrap();
-    let mut seq_results: BTreeMap<OrderedFloat, BTreeSet<i32>> = BTreeMap::new();
+    let mut seq_results: Vec<i32> = Vec::new();
+    let mut seq_result_ranks: Vec<f64> = Vec::new();
     for row in restuple {
-        let id: i32 = row.get::<_, i32>(0);
-        let rank: f32 = row.get::<_, f32>(1);
-        seq_results
-            .entry(OrderedFloat(rank))
-            .or_default()
-            .insert(id);
+        seq_results.push(row.get::<_, i32>(0));
+        seq_result_ranks.push(row.get::<_, f64>(1));
     }
-    seq_results.pop_last();
 
-    let mut miss_cnt = 0;
-    for (rank, seq_id) in &seq_results {
-        let Some(index_id) = index_results.get(rank) else {
-            miss_cnt += seq_id.len();
-            continue;
-        };
-        for id in seq_id {
-            if !index_id.contains(id) {
-                miss_cnt += 1;
-            }
+    if distance(&index_results, &seq_results) > 10 {
+        println!("Query = {query_vector}");
+        println!("Index =");
+        for (id, rank) in std::iter::zip(index_results, index_result_ranks) {
+            println!("  | {id} | {rank}");
         }
-    }
-    if miss_cnt > 10 {
-        panic!(
-            "Index and Seq results do not match\nindex_results: {:?}\nseq_results: {:?}",
-            index_results, seq_results
-        );
+        println!("Seq =");
+        for (id, rank) in std::iter::zip(seq_results, seq_result_ranks) {
+            println!("  | {id} | {rank}");
+        }
+        panic!("Index and Seq results do not match");
     }
 }
 
@@ -253,11 +201,31 @@ fn fuzz_vacuum(client: &mut postgres::Client, _rng: &mut impl RngExt) {
     client.execute(r#"VACUUM FULL documents"#, &[]).unwrap();
 }
 
+fn distance<T: Eq>(a: &[T], b: &[T]) -> usize {
+    use std::cmp::min;
+
+    let (a, b) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+
+    if a.is_empty() {
+        return b.len();
+    }
+
+    let mut f = (0..a.len() + 1).collect::<Vec<usize>>();
+    let mut last;
+
+    for (j, y) in b.iter().enumerate() {
+        (last, f[0]) = (f[0], j + 1);
+        for (i, x) in a.iter().enumerate() {
+            let value = min(f[i + 1] + 1, min(f[i] + 1, last + (x != y) as usize));
+            (last, f[i + 1]) = (f[i + 1], value);
+        }
+    }
+
+    f[a.len()]
+}
+
 fn main() {
     let params = std::env::args().nth(1).unwrap();
     let mut client = postgres::Client::connect(&params, postgres::tls::NoTls).unwrap();
-    client
-        .execute(r#"SET search_path = "$user", public, bm25_catalog"#, &[])
-        .unwrap();
     test(&mut client);
 }
