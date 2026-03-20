@@ -5,12 +5,12 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+score = { path = "../score" }
+simd = { path = "../simd" }
+u48 = { path = "../u48" }
+
 always_equal.workspace = true
-bitpacking = { version = "0.9.3", default-features = false, features = [
-    "bitpacker4x",
-] }
 index.workspace = true
-ordered-float.workspace = true
 serde.workspace = true
 validator.workspace = true
 zerocopy.workspace = true

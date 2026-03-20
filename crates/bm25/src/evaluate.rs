@@ -16,12 +16,13 @@ use crate::tuples::{MetaTuple, SegmentTuple, TokenTuple, WithReader};
 use crate::vector::Bm25VectorBorrowed;
 use crate::{Opaque, guide, idf, tf};
 use index::relation::{Page, RelationRead};
+use score::Score;
 
 pub fn evaluate<R: RelationRead>(
     index: &R,
     document: Bm25VectorBorrowed<'_>,
     query: Bm25VectorBorrowed<'_>,
-) -> f64
+) -> Score
 where
     R::Page: Page<Opaque = Opaque>,
 {
@@ -45,7 +46,7 @@ where
 
     let mut result = 0.0;
     for (key, value) in meet(document, query) {
-        let Some(token) = guide::read(index, segment_tuple.iptr_tokens(), key) else {
+        let Some(token) = guide::u32_read(index, segment_tuple.iptr_tokens(), key) else {
             continue;
         };
         let token_guard = index.read(token.0);
@@ -56,7 +57,7 @@ where
         let tf = tf(k1, b, avgdl, document_length, value);
         result += idf * tf;
     }
-    result
+    Score::from_f64(result)
 }
 
 fn meet(
