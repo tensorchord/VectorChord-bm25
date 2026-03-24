@@ -17,6 +17,7 @@
 mod bitpacking;
 mod emulate;
 
+pub mod bitpacking_u16_ordered;
 pub mod bitpacking_u16_unordered;
 pub mod bitpacking_u32_ordered;
 pub mod bitpacking_u32_unordered;
