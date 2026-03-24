@@ -18,7 +18,7 @@ use crate::{Opaque, compression, guide, idf, tf};
 use always_equal::AlwaysEqual;
 use core::f64;
 use index::relation::{Page, RelationRead};
-use ordered_float::OrderedFloat;
+use score::Score;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, VecDeque};
 use std::iter::chain;
@@ -29,7 +29,7 @@ pub fn search<R: RelationRead>(
     k: NonZero<usize>,
     query: Bm25VectorBorrowed<'_>,
     mut filter: impl FnMut([u16; 3]) -> bool,
-) -> Vec<(Reverse<OrderedFloat<f64>>, AlwaysEqual<[u16; 3]>)>
+) -> Vec<(Reverse<Score>, AlwaysEqual<[u16; 3]>)>
 where
     R::Page: Page<Opaque = Opaque>,
 {
@@ -209,24 +209,24 @@ where
 
 pub struct Results<T> {
     limit: NonZero<usize>,
-    threshold: OrderedFloat<f64>,
-    internal: BinaryHeap<(Reverse<OrderedFloat<f64>>, AlwaysEqual<T>)>,
+    threshold: Score,
+    internal: BinaryHeap<(Reverse<Score>, AlwaysEqual<T>)>,
 }
 
 impl<T> Results<T> {
     pub fn new(limit: NonZero<usize>, threshold: f64) -> Self {
         Self {
             limit,
-            threshold: OrderedFloat(threshold),
+            threshold: Score::from_f64(threshold),
             internal: BinaryHeap::new(),
         }
     }
     pub fn threshold(&self) -> f64 {
-        self.threshold.0
+        self.threshold.to_f64()
     }
     pub fn push(&mut self, key: f64, value: T) {
         self.internal
-            .push((Reverse(OrderedFloat(key)), AlwaysEqual(value)));
+            .push((Reverse(Score::from_f64(key)), AlwaysEqual(value)));
         if self.internal.len() > self.limit.get() {
             self.internal.pop();
         }
@@ -234,7 +234,7 @@ impl<T> Results<T> {
             self.threshold = self.threshold.max(self.internal.peek().unwrap().0.0);
         }
     }
-    pub fn into_sorted_vec(self) -> Vec<(Reverse<OrderedFloat<f64>>, AlwaysEqual<T>)> {
+    pub fn into_sorted_vec(self) -> Vec<(Reverse<Score>, AlwaysEqual<T>)> {
         self.internal.into_sorted_vec()
     }
 }

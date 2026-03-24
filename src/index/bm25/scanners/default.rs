@@ -20,7 +20,6 @@ use always_equal::AlwaysEqual;
 use bm25::vector::Bm25VectorOwned;
 use index::bump::Bump;
 use index::relation::{Page, RelationPrefetch, RelationRead, RelationReadStream};
-use ordered_float::OrderedFloat;
 use pgrx::heap_tuple::PgHeapTuple;
 use std::cmp::Reverse;
 use std::num::NonZero;
@@ -108,11 +107,9 @@ impl SearchBuilder for DefaultBuilder {
                 true
             })
         };
-        let iter = result.into_iter().map(
-            move |(Reverse(OrderedFloat(distance)), AlwaysEqual(pointer))| {
-                (distance, pointer, false)
-            },
-        );
+        let iter = result
+            .into_iter()
+            .map(move |(Reverse(score), AlwaysEqual(pointer))| (score.to_f64(), pointer, false));
         Box::new(iter)
     }
 }
