@@ -93,6 +93,22 @@ jobs:
           VERSION: ${{ matrix.version }}
         run: |
           make DESTDIR="~/debian" install
+          mkdir -p ~/debian/usr/share/doc/postgresql-${VERSION}-vchord-bm25/
+          echo "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+          Upstream-Name: VectorChord-bm25
+          Source: https://github.com/tensorchord/VectorChord-bm25
+
+          Files: *
+          Copyright: Copyright (c) 2025-2026 TensorChord Inc.
+          License: AGPL-3.0-only OR Elastic-2.0
+
+          License: AGPL-3.0-only
+           $(cat ./licenses/LICENSE.AGPLv3 | sed 's/^$/./' | sed 's/^/ /')
+
+          License: Elastic-2.0
+            $(cat ./licenses/LICENSE.ELv2 | sed 's/^$/./' | sed 's/^/ /')
+          " \
+          >> ~/debian/usr/share/doc/postrgesql-${VERSION}-vchord-bm25/copyright
           ARCH=$(uname -m)
           PLATFORM=$(dpkg --print-architecture)
           mkdir -p ~/debian/DEBIAN
@@ -103,9 +119,9 @@ jobs:
           Priority: optional
           Architecture: ${PLATFORM}
           Maintainer: Tensorchord <support@tensorchord.ai>
-          Description: Vector database plugin for Postgres, written in Rust, specifically designed for LLM
-          Homepage: https://vectorchord.ai/
-          License: AGPL-3.0-only OR Elastic-2.0" \
+          Description: A postgresql extension for bm25 ranking algorithm
+           Native BM25 Ranking Index in PostgreSQL.
+          Homepage: https://vectorchord.ai/" \
           > ~/debian/DEBIAN/control
           (cd ~/debian && find usr -type f -print0 | xargs -0 md5sum) > ~/debian/DEBIAN/md5sums
           dpkg-deb --root-owner-group -Zxz --build ~/debian ~/postgresql-${VERSION}-vchord-bm25_${SEMVER}-1_${PLATFORM}.deb
