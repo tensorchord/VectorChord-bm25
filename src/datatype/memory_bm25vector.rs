@@ -43,6 +43,7 @@ impl Bm25VectorHeader {
                     (&raw const (*this).elements).cast::<u32>().add(0 * len),
                     len,
                 ),
+                #[expect(clippy::identity_op)]
                 std::slice::from_raw_parts(
                     (&raw const (*this).elements).cast::<u32>().add(1 * len),
                     len,
@@ -125,6 +126,7 @@ impl Bm25VectorOutput {
             );
             std::ptr::copy_nonoverlapping(
                 vector.values().as_ptr(),
+                #[expect(clippy::identity_op)]
                 (&raw mut (*ptr).elements)
                     .cast::<u32>()
                     .add(1 * len as usize),

@@ -22,30 +22,30 @@ use crate::{Opaque, compression, guide, tf};
 use index::relation::{Page, RelationWrite};
 use std::collections::BTreeMap;
 use std::iter::zip;
-use u48::U48;
 
 pub struct Segment {
-    documents: BTreeMap<U48, u32>,
-    tokens: BTreeMap<u32, Vec<(U48, u32)>>,
+    documents: Vec<(u32, [u16; 3])>,
+    tokens: BTreeMap<u32, Vec<(u32, u32)>>,
     sum_of_document_lengths: u64,
 }
 
 impl Segment {
     pub fn new() -> Self {
         Self {
-            documents: BTreeMap::new(),
+            documents: Vec::new(),
             tokens: BTreeMap::new(),
             sum_of_document_lengths: 0,
         }
     }
-    pub fn push(&mut self, payload: [u16; 3], document: Bm25VectorBorrowed<'_>) {
-        let document_id = U48::from_array(payload);
+    pub fn push(&mut self, document: Bm25VectorBorrowed<'_>, payload: [u16; 3]) {
+        let i = self.documents.len();
+        let Ok(i) = u32::try_from(i) else {
+            panic!("number of documents exceeds {}", u32::MAX - 1);
+        };
         let norm = document.norm();
-        if self.documents.insert(document_id, norm).is_some() {
-            panic!("document is already inserted");
-        }
+        self.documents.push((norm, payload));
         for (&key, &val) in zip(document.indexes(), document.values()) {
-            self.tokens.entry(key).or_default().push((document_id, val));
+            self.tokens.entry(key).or_default().push((i, val));
         }
         self.sum_of_document_lengths += norm as u64;
     }
@@ -75,15 +75,16 @@ where
 
     let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index, false);
     let mut map_documents = Vec::new();
-    for (&document_id, &document_length) in documents.iter() {
+    for (document_id, &(document_length, payload)) in documents.iter().enumerate() {
         map_documents.push((
-            document_id,
+            document_id as u32,
             tape_documents.push(DocumentTuple {
                 length: document_length,
+                payload,
             }),
         ));
     }
-    let length = |document_id: U48| documents[&document_id];
+    let length = |i: u32| documents[i as usize].0;
 
     let mut tape_blocks = TapeWriter::<_, BlockTuple>::create(index, false);
     let mut tape_summaries = TapeWriter::<_, SummaryTuple>::create(index, false);
@@ -97,27 +98,16 @@ where
             let min_document_id = block.first().unwrap().0;
             let max_document_id = block.last().unwrap().0;
             let number_of_documents = block.len() as u32;
-            let document_ids_0 = block
-                .iter()
-                .map(|&(x, _)| x.to_pair().0)
-                .collect::<Vec<_>>();
-            let document_ids_1 = block
-                .iter()
-                .map(|&(x, _)| x.to_pair().1)
-                .collect::<Vec<_>>();
+            let document_ids = block.iter().map(|&(x, _)| x).collect::<Vec<_>>();
             let term_frequencies = block.iter().map(|&(_, x)| x).collect::<Vec<_>>();
-            let (bitwidth_document_ids_0, compressed_document_ids_0) =
-                compression::compress_document_ids_0(min_document_id.to_pair().0, &document_ids_0);
-            let (bitwidth_document_ids_1, compressed_document_ids_1) =
-                compression::compress_document_ids_1(&document_ids_1);
+            let (bitwidth_document_ids, compressed_document_ids) =
+                compression::compress_document_ids(min_document_id, &document_ids);
             let (bitwidth_term_frequencies, compressed_term_frequencies) =
                 compression::compress_term_frequencies(&term_frequencies);
             let wptr_block = tape_blocks.push(BlockTuple {
-                bitwidth_document_ids_0,
-                bitwidth_document_ids_1,
+                bitwidth_document_ids,
                 bitwidth_term_frequencies,
-                compressed_document_ids_0,
-                compressed_document_ids_1,
+                compressed_document_ids,
                 compressed_term_frequencies,
             });
             let mut block_wand = Wand::new();
@@ -152,8 +142,8 @@ where
         number_of_documents: documents.len() as _,
         number_of_tokens: tokens.len() as _,
         sum_of_document_lengths,
-        iptr_documents: guide::u48_write(index, &map_documents),
-        iptr_tokens: guide::u32_write(index, &map_tokens),
+        iptr_documents: guide::write(index, &map_documents),
+        iptr_tokens: guide::write(index, &map_tokens),
         sptr_summaries: { tape_summaries }.first(),
         sptr_blocks: { tape_blocks }.first(),
     });

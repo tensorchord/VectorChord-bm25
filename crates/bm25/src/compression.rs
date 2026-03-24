@@ -12,33 +12,31 @@
 //
 // Copyright (c) 2025 TensorChord Inc.
 
+use bitpacking::BitPacker;
 use zerocopy::{FromBytes, IntoBytes, Unalign};
 
-pub fn compress_document_ids_0(min_document_id_0: u32, uncompressed: &[u32]) -> (u8, Vec<u8>) {
+pub fn compress_document_ids(min_document_id: u32, uncompressed: &[u32]) -> (u8, Vec<u8>) {
+    debug_assert!(min_document_id <= uncompressed.iter().copied().min().unwrap_or(u32::MAX));
     let n = uncompressed.len();
     if n > 128 {
         panic!("block size exceeds 128");
     }
-    if let Ok(uncompressed) = <&[u32; 128]>::try_from(uncompressed) {
-        let bitwidth = simd::bitpacking_u32_ordered::bitwidth(min_document_id_0, uncompressed);
-        let mut compressed = vec![0_u8; 128 * (bitwidth as usize) / 8];
-        simd::bitpacking_u32_ordered::compress(
-            min_document_id_0,
-            bitwidth,
-            uncompressed,
-            compressed.as_mut(),
-        );
-        (bitwidth, compressed)
-    } else {
-        (u8::MAX, uncompressed.as_bytes().to_vec())
+    if n < 128 {
+        return (u8::MAX, uncompressed.as_bytes().to_vec());
     }
+    let bitpacker = bitpacking::BitPacker4x::new();
+    let bitwidth = bitpacker.num_bits_strictly_sorted(Some(min_document_id), uncompressed);
+    let mut compressed = vec![0_u8; 128 * (bitwidth as usize) / 8];
+    bitpacker.compress_strictly_sorted(
+        Some(min_document_id),
+        uncompressed,
+        compressed.as_mut(),
+        bitwidth,
+    );
+    (bitwidth, compressed)
 }
 
-pub fn decompress_document_ids_0(
-    min_document_id_0: u32,
-    bitwidth: u8,
-    compressed: &[u8],
-) -> Vec<u32> {
+pub fn decompress_document_ids(min_document_id: u32, bitwidth: u8, compressed: &[u8]) -> Vec<u32> {
     if bitwidth == u8::MAX {
         let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
         let mut decompressed = Vec::<u32>::with_capacity(d.len());
@@ -49,46 +47,15 @@ pub fn decompress_document_ids_0(
         };
         decompressed
     } else {
-        let mut decompressed = [0_u32; 128];
-        simd::bitpacking_u32_ordered::decompress(
-            min_document_id_0,
-            bitwidth,
+        let bitpacker = bitpacking::BitPacker4x::new();
+        let mut decompressed = vec![0_u32; 128];
+        bitpacker.decompress_strictly_sorted(
+            Some(min_document_id),
             compressed,
-            &mut decompressed,
+            decompressed.as_mut(),
+            bitwidth,
         );
-        decompressed.to_vec()
-    }
-}
-
-pub fn compress_document_ids_1(uncompressed: &[u16]) -> (u8, Vec<u8>) {
-    let n = uncompressed.len();
-    if n > 128 {
-        panic!("block size exceeds 128");
-    }
-    if let Ok(uncompressed) = <&[u16; 128]>::try_from(uncompressed) {
-        let bitwidth = simd::bitpacking_u16_unordered::bitwidth(uncompressed);
-        let mut compressed = vec![0_u8; 128 * (bitwidth as usize) / 8];
-        simd::bitpacking_u16_unordered::compress(bitwidth, uncompressed, compressed.as_mut());
-        (bitwidth, compressed)
-    } else {
-        (u8::MAX, uncompressed.as_bytes().to_vec())
-    }
-}
-
-pub fn decompress_document_ids_1(bitwidth: u8, compressed: &[u8]) -> Vec<u16> {
-    if bitwidth == u8::MAX {
-        let d = <[Unalign<u16>]>::ref_from_bytes(compressed).expect("data corruption");
-        let mut decompressed = Vec::<u16>::with_capacity(d.len());
-        #[allow(unsafe_code)]
-        unsafe {
-            core::ptr::copy_nonoverlapping(d.as_ptr(), decompressed.as_mut_ptr().cast(), d.len());
-            decompressed.set_len(d.len());
-        };
         decompressed
-    } else {
-        let mut decompressed = [0_u16; 128];
-        simd::bitpacking_u16_unordered::decompress(bitwidth, compressed, &mut decompressed);
-        decompressed.to_vec()
     }
 }
 
@@ -97,14 +64,14 @@ pub fn compress_term_frequencies(uncompressed: &[u32]) -> (u8, Vec<u8>) {
     if n > 128 {
         panic!("block size exceeds 128");
     }
-    if let Ok(uncompressed) = <&[u32; 128]>::try_from(uncompressed) {
-        let bitwidth = simd::bitpacking_u32_unordered::bitwidth(uncompressed);
-        let mut compressed = vec![0_u8; 128 * (bitwidth as usize) / 8];
-        simd::bitpacking_u32_unordered::compress(bitwidth, uncompressed, compressed.as_mut());
-        (bitwidth, compressed)
-    } else {
-        (u8::MAX, uncompressed.as_bytes().to_vec())
+    if n < 128 {
+        return (u8::MAX, uncompressed.as_bytes().to_vec());
     }
+    let bitpacker = bitpacking::BitPacker4x::new();
+    let bitwidth = bitpacker.num_bits(uncompressed);
+    let mut compressed = vec![0_u8; 128 * (bitwidth as usize) / 8];
+    bitpacker.compress(uncompressed, compressed.as_mut(), bitwidth);
+    (bitwidth, compressed)
 }
 
 pub fn decompress_term_frequencies(bitwidth: u8, compressed: &[u8]) -> Vec<u32> {
@@ -118,8 +85,9 @@ pub fn decompress_term_frequencies(bitwidth: u8, compressed: &[u8]) -> Vec<u32> 
         };
         decompressed
     } else {
-        let mut decompressed = [0_u32; 128];
-        simd::bitpacking_u32_unordered::decompress(bitwidth, compressed, &mut decompressed);
-        decompressed.to_vec()
+        let bitpacker = bitpacking::BitPacker4x::new();
+        let mut decompressed = vec![0_u32; 128];
+        bitpacker.decompress(compressed, decompressed.as_mut(), bitwidth);
+        decompressed
     }
 }

@@ -13,7 +13,6 @@ name = "pgrx_embed_vchord_bm25"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]
-default = ["simd/init"]
 pg14 = ["pgrx/pg14"]
 pg15 = ["pgrx/pg15"]
 pg16 = ["pgrx/pg16"]
@@ -22,12 +21,11 @@ pg18 = ["pgrx/pg18"]
 
 [dependencies]
 bm25 = { path = "./crates/bm25" }
-score = { path = "./crates/score" }
-simd = { path = "./crates/simd" }
 
 always_equal.workspace = true
 bumpalo = "3.20.2"
 index.workspace = true
+ordered-float.workspace = true
 pgrx = "=0.17.0"
 pgrx-catalog = "0.3.2"
 serde.workspace = true
@@ -51,21 +49,19 @@ edition = "2024"
 [workspace.dependencies]
 always_equal = { git = "https://github.com/tensorchord/VectorChord.git" }
 index = { git = "https://github.com/tensorchord/VectorChord.git" }
+ordered-float = { version = "5.1.0", default-features = false }
 rand = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
-simd_macros = { git = "https://github.com/tensorchord/VectorChord.git" }
 validator = { version = "0.20.0", features = ["derive"] }
-zerocopy = { version = "0.8.47", features = ["derive", "simd"] }
+zerocopy = { version = "0.8.42", features = ["derive"] }
 
 [workspace.lints]
 # complexity
-clippy.identity_op = "allow"
 clippy.manual_is_multiple_of = "allow"
 clippy.too_many_arguments = "allow"
 clippy.type_complexity = "allow"
 # style
 clippy.collapsible_if = "allow"
-clippy.just_underscores_and_digits = "allow"
 clippy.needless_range_loop = "allow"
 # unsafe
 rust.unsafe_code = "deny"

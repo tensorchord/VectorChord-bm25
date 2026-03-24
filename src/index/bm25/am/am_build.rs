@@ -156,7 +156,7 @@ pub unsafe extern "C-unwind" fn ambuild(
             Some(vector.as_borrowed().own())
         };
         if let Some(document) = document {
-            segment.push(ctid_to_key(ctid), document.as_borrowed());
+            segment.push(document.as_borrowed(), ctid_to_key(ctid));
             indtuples += 1;
             reporter.tuples_done(indtuples);
         }

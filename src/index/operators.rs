@@ -48,7 +48,7 @@ pub fn _bm25_evaluate(lhs: Bm25VectorInput, rhs: pgrx::composite_type!("bm25quer
     let relation = Index::open(indexrelid, pgrx::pg_sys::AccessShareLock as _);
     let index = unsafe { PostgresRelation::new(relation.raw()) };
     let score = bm25::evaluate(&index, document.as_borrowed(), query.as_borrowed());
-    -score.to_f64()
+    -score
 }
 
 struct Index {

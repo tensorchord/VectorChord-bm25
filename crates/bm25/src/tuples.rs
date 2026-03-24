@@ -13,7 +13,6 @@
 // Copyright (c) 2025 TensorChord Inc.
 
 use index::tuples::{Padding, RefChecker};
-use u48::U48;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 pub const ALIGN: usize = 8;
@@ -130,7 +129,7 @@ impl<'a> MetaTupleReader<'a> {
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
-struct U32IndexTupleHeader0 {
+struct IndexTupleHeader0 {
     pairs_s: u16,
     pairs_e: u16,
     _padding_0: [Padding; 4],
@@ -138,24 +137,24 @@ struct U32IndexTupleHeader0 {
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
-struct U32IndexTupleHeader1 {
+struct IndexTupleHeader1 {
     pairs_s: u16,
     pairs_e: u16,
     _padding_0: [Padding; 4],
 }
 
-pub enum U32IndexTuple {
-    _0 { pairs: Vec<U32Index0> },
-    _1 { pairs: Vec<U32Index1> },
+pub enum IndexTuple {
+    _0 { pairs: Vec<Index0> },
+    _1 { pairs: Vec<Index1> },
 }
 
-impl Tuple for U32IndexTuple {
+impl Tuple for IndexTuple {
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::<u8>::new();
         match self {
-            U32IndexTuple::_0 { pairs } => {
+            IndexTuple::_0 { pairs } => {
                 buffer.extend((0 as Tag).to_ne_bytes());
-                buffer.extend(std::iter::repeat_n(0, size_of::<U32IndexTupleHeader0>()));
+                buffer.extend(std::iter::repeat_n(0, size_of::<IndexTupleHeader0>()));
                 // pairs
                 let pairs_s = buffer.len() as u16;
                 buffer.extend(pairs.as_bytes());
@@ -164,8 +163,8 @@ impl Tuple for U32IndexTuple {
                     buffer.push(0);
                 }
                 // header
-                buffer[size_of::<Tag>()..][..size_of::<U32IndexTupleHeader0>()].copy_from_slice(
-                    U32IndexTupleHeader0 {
+                buffer[size_of::<Tag>()..][..size_of::<IndexTupleHeader0>()].copy_from_slice(
+                    IndexTupleHeader0 {
                         pairs_s,
                         pairs_e,
                         _padding_0: Default::default(),
@@ -173,9 +172,9 @@ impl Tuple for U32IndexTuple {
                     .as_bytes(),
                 );
             }
-            U32IndexTuple::_1 { pairs } => {
+            IndexTuple::_1 { pairs } => {
                 buffer.extend((1 as Tag).to_ne_bytes());
-                buffer.extend(std::iter::repeat_n(0, size_of::<U32IndexTupleHeader1>()));
+                buffer.extend(std::iter::repeat_n(0, size_of::<IndexTupleHeader1>()));
                 // pairs
                 let pairs_s = buffer.len() as u16;
                 buffer.extend(pairs.as_bytes());
@@ -184,8 +183,8 @@ impl Tuple for U32IndexTuple {
                     buffer.push(0);
                 }
                 // header
-                buffer[size_of::<Tag>()..][..size_of::<U32IndexTupleHeader1>()].copy_from_slice(
-                    U32IndexTupleHeader1 {
+                buffer[size_of::<Tag>()..][..size_of::<IndexTupleHeader1>()].copy_from_slice(
+                    IndexTupleHeader1 {
                         pairs_s,
                         pairs_e,
                         _padding_0: Default::default(),
@@ -198,23 +197,23 @@ impl Tuple for U32IndexTuple {
     }
 }
 
-impl WithReader for U32IndexTuple {
-    type Reader<'a> = U32IndexTupleReader<'a>;
+impl WithReader for IndexTuple {
+    type Reader<'a> = IndexTupleReader<'a>;
 
-    fn deserialize_ref(source: &[u8]) -> U32IndexTupleReader<'_> {
+    fn deserialize_ref(source: &[u8]) -> IndexTupleReader<'_> {
         let tag = tag(source);
         match tag {
             0 => {
                 let checker = RefChecker::new(source);
-                let header: &U32IndexTupleHeader0 = checker.prefix(size_of::<Tag>());
-                let pairs: &[U32Index0] = checker.bytes(header.pairs_s, header.pairs_e);
-                U32IndexTupleReader::_0(U32IndexTupleReader0 { header, pairs })
+                let header: &IndexTupleHeader0 = checker.prefix(size_of::<Tag>());
+                let pairs: &[Index0] = checker.bytes(header.pairs_s, header.pairs_e);
+                IndexTupleReader::_0(IndexTupleReader0 { header, pairs })
             }
             1 => {
                 let checker = RefChecker::new(source);
-                let header: &U32IndexTupleHeader1 = checker.prefix(size_of::<Tag>());
-                let pairs: &[U32Index1] = checker.bytes(header.pairs_s, header.pairs_e);
-                U32IndexTupleReader::_1(U32IndexTupleReader1 { header, pairs })
+                let header: &IndexTupleHeader1 = checker.prefix(size_of::<Tag>());
+                let pairs: &[Index1] = checker.bytes(header.pairs_s, header.pairs_e);
+                IndexTupleReader::_1(IndexTupleReader1 { header, pairs })
             }
             _ => panic!("deserialization: bad magic number"),
         }
@@ -222,158 +221,33 @@ impl WithReader for U32IndexTuple {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum U32IndexTupleReader<'a> {
-    _0(U32IndexTupleReader0<'a>),
-    _1(U32IndexTupleReader1<'a>),
+pub enum IndexTupleReader<'a> {
+    _0(IndexTupleReader0<'a>),
+    _1(IndexTupleReader1<'a>),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct U32IndexTupleReader0<'a> {
+pub struct IndexTupleReader0<'a> {
     #[expect(dead_code)]
-    header: &'a U32IndexTupleHeader0,
-    pairs: &'a [U32Index0],
+    header: &'a IndexTupleHeader0,
+    pairs: &'a [Index0],
 }
 
-impl<'a> U32IndexTupleReader0<'a> {
-    pub fn pairs(self) -> &'a [U32Index0] {
+impl<'a> IndexTupleReader0<'a> {
+    pub fn pairs(self) -> &'a [Index0] {
         self.pairs
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct U32IndexTupleReader1<'a> {
+pub struct IndexTupleReader1<'a> {
     #[expect(dead_code)]
-    header: &'a U32IndexTupleHeader1,
-    pairs: &'a [U32Index1],
+    header: &'a IndexTupleHeader1,
+    pairs: &'a [Index1],
 }
 
-impl<'a> U32IndexTupleReader1<'a> {
-    pub fn pairs(self) -> &'a [U32Index1] {
-        self.pairs
-    }
-}
-
-#[repr(C, align(8))]
-#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
-struct U48IndexTupleHeader0 {
-    pairs_s: u16,
-    pairs_e: u16,
-    _padding_0: [Padding; 4],
-}
-
-#[repr(C, align(8))]
-#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
-struct U48IndexTupleHeader1 {
-    pairs_s: u16,
-    pairs_e: u16,
-    _padding_0: [Padding; 4],
-}
-
-pub enum U48IndexTuple {
-    _0 { pairs: Vec<U48Index0> },
-    _1 { pairs: Vec<U48Index1> },
-}
-
-impl Tuple for U48IndexTuple {
-    fn serialize(&self) -> Vec<u8> {
-        let mut buffer = Vec::<u8>::new();
-        match self {
-            U48IndexTuple::_0 { pairs } => {
-                buffer.extend((0 as Tag).to_ne_bytes());
-                buffer.extend(std::iter::repeat_n(0, size_of::<U48IndexTupleHeader0>()));
-                // pairs
-                let pairs_s = buffer.len() as u16;
-                buffer.extend(pairs.as_bytes());
-                let pairs_e = buffer.len() as u16;
-                while buffer.len() % ALIGN != 0 {
-                    buffer.push(0);
-                }
-                // header
-                buffer[size_of::<Tag>()..][..size_of::<U48IndexTupleHeader0>()].copy_from_slice(
-                    U48IndexTupleHeader0 {
-                        pairs_s,
-                        pairs_e,
-                        _padding_0: Default::default(),
-                    }
-                    .as_bytes(),
-                );
-            }
-            U48IndexTuple::_1 { pairs } => {
-                buffer.extend((1 as Tag).to_ne_bytes());
-                buffer.extend(std::iter::repeat_n(0, size_of::<U48IndexTupleHeader1>()));
-                // pairs
-                let pairs_s = buffer.len() as u16;
-                buffer.extend(pairs.as_bytes());
-                let pairs_e = buffer.len() as u16;
-                while buffer.len() % ALIGN != 0 {
-                    buffer.push(0);
-                }
-                // header
-                buffer[size_of::<Tag>()..][..size_of::<U48IndexTupleHeader1>()].copy_from_slice(
-                    U48IndexTupleHeader1 {
-                        pairs_s,
-                        pairs_e,
-                        _padding_0: Default::default(),
-                    }
-                    .as_bytes(),
-                );
-            }
-        }
-        buffer
-    }
-}
-
-impl WithReader for U48IndexTuple {
-    type Reader<'a> = U48IndexTupleReader<'a>;
-
-    fn deserialize_ref(source: &[u8]) -> U48IndexTupleReader<'_> {
-        let tag = tag(source);
-        match tag {
-            0 => {
-                let checker = RefChecker::new(source);
-                let header: &U48IndexTupleHeader0 = checker.prefix(size_of::<Tag>());
-                let pairs: &[U48Index0] = checker.bytes(header.pairs_s, header.pairs_e);
-                U48IndexTupleReader::_0(U48IndexTupleReader0 { header, pairs })
-            }
-            1 => {
-                let checker = RefChecker::new(source);
-                let header: &U48IndexTupleHeader1 = checker.prefix(size_of::<Tag>());
-                let pairs: &[U48Index1] = checker.bytes(header.pairs_s, header.pairs_e);
-                U48IndexTupleReader::_1(U48IndexTupleReader1 { header, pairs })
-            }
-            _ => panic!("deserialization: bad magic number"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum U48IndexTupleReader<'a> {
-    _0(U48IndexTupleReader0<'a>),
-    _1(U48IndexTupleReader1<'a>),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct U48IndexTupleReader0<'a> {
-    #[expect(dead_code)]
-    header: &'a U48IndexTupleHeader0,
-    pairs: &'a [U48Index0],
-}
-
-impl<'a> U48IndexTupleReader0<'a> {
-    pub fn pairs(self) -> &'a [U48Index0] {
-        self.pairs
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct U48IndexTupleReader1<'a> {
-    #[expect(dead_code)]
-    header: &'a U48IndexTupleHeader1,
-    pairs: &'a [U48Index1],
-}
-
-impl<'a> U48IndexTupleReader1<'a> {
-    pub fn pairs(self) -> &'a [U48Index1] {
+impl<'a> IndexTupleReader1<'a> {
+    pub fn pairs(self) -> &'a [Index1] {
         self.pairs
     }
 }
@@ -462,17 +336,20 @@ impl<'a> SegmentTupleReader<'a> {
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct DocumentTupleHeader {
     length: u32,
-    _padding_0: [Padding; 4],
+    payload: [u16; 3],
+    _padding_0: [Padding; 6],
 }
 
 pub struct DocumentTuple {
     pub length: u32,
+    pub payload: [u16; 3],
 }
 
 impl Tuple for DocumentTuple {
     fn serialize(&self) -> Vec<u8> {
         DocumentTupleHeader {
             length: self.length,
+            payload: self.payload,
             _padding_0: Default::default(),
         }
         .as_bytes()
@@ -499,6 +376,9 @@ impl<'a> DocumentTupleReader<'a> {
     pub fn length(self) -> u32 {
         self.header.length
     }
+    pub fn payload(self) -> [u16; 3] {
+        self.header.payload
+    }
 }
 
 #[repr(C, align(8))]
@@ -508,7 +388,7 @@ struct TokenTupleHeader {
     wand_document_length: u32,
     wand_term_frequency: u32,
     wptr_summaries: Pointer,
-    _padding_0: [Padding; 6],
+    _padding_0: [Padding; 4],
 }
 
 pub struct TokenTuple {
@@ -566,19 +446,18 @@ impl<'a> TokenTupleReader<'a> {
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct SummaryTupleHeader {
     token_id: u32,
-    min_document_id: U48,
-    max_document_id: U48,
+    min_document_id: u32,
+    max_document_id: u32,
     number_of_documents: u32,
     wand_document_length: u32,
     wand_term_frequency: u32,
     wptr_block: Pointer,
-    _padding_0: [Padding; 6],
 }
 
 pub struct SummaryTuple {
     pub token_id: u32,
-    pub min_document_id: U48,
-    pub max_document_id: U48,
+    pub min_document_id: u32,
+    pub max_document_id: u32,
     pub number_of_documents: u32,
     pub wand_document_length: u32,
     pub wand_term_frequency: u32,
@@ -595,7 +474,6 @@ impl Tuple for SummaryTuple {
             wand_document_length: self.wand_document_length,
             wand_term_frequency: self.wand_term_frequency,
             wptr_block: self.wptr_block,
-            _padding_0: Default::default(),
         }
         .as_bytes()
         .to_vec()
@@ -621,10 +499,10 @@ impl<'a> SummaryTupleReader<'a> {
     pub fn token_id(self) -> u32 {
         self.header.token_id
     }
-    pub fn min_document_id(self) -> U48 {
+    pub fn min_document_id(self) -> u32 {
         self.header.min_document_id
     }
-    pub fn max_document_id(self) -> U48 {
+    pub fn max_document_id(self) -> u32 {
         self.header.max_document_id
     }
     pub fn number_of_documents(self) -> u32 {
@@ -644,24 +522,19 @@ impl<'a> SummaryTupleReader<'a> {
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct BlockTupleHeader {
-    bitwidth_document_ids_0: u8,
-    bitwidth_document_ids_1: u8,
+    bitwidth_document_ids: u8,
     bitwidth_term_frequencies: u8,
-    _padding_0: [Padding; 1],
-    compressed_document_ids_0_s: u16,
-    compressed_document_ids_0_e: u16,
-    compressed_document_ids_1_s: u16,
-    compressed_document_ids_1_e: u16,
+    compressed_document_ids_s: u16,
+    compressed_document_ids_e: u16,
     compressed_term_frequencies_s: u16,
     compressed_term_frequencies_e: u16,
+    _padding_0: [Padding; 6],
 }
 
 pub struct BlockTuple {
-    pub bitwidth_document_ids_0: u8,
-    pub bitwidth_document_ids_1: u8,
+    pub bitwidth_document_ids: u8,
     pub bitwidth_term_frequencies: u8,
-    pub compressed_document_ids_0: Vec<u8>,
-    pub compressed_document_ids_1: Vec<u8>,
+    pub compressed_document_ids: Vec<u8>,
     pub compressed_term_frequencies: Vec<u8>,
 }
 
@@ -669,17 +542,10 @@ impl Tuple for BlockTuple {
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::<u8>::new();
         buffer.extend(std::iter::repeat_n(0, size_of::<BlockTupleHeader>()));
-        // compressed_document_ids_0
-        let compressed_document_ids_0_s = buffer.len() as u16;
-        buffer.extend(self.compressed_document_ids_0.as_bytes());
-        let compressed_document_ids_0_e = buffer.len() as u16;
-        while buffer.len() % ALIGN != 0 {
-            buffer.push(0);
-        }
-        // compressed_document_ids_1
-        let compressed_document_ids_1_s = buffer.len() as u16;
-        buffer.extend(self.compressed_document_ids_1.as_bytes());
-        let compressed_document_ids_1_e = buffer.len() as u16;
+        // compressed_document_ids
+        let compressed_document_ids_s = buffer.len() as u16;
+        buffer.extend(self.compressed_document_ids.as_bytes());
+        let compressed_document_ids_e = buffer.len() as u16;
         while buffer.len() % ALIGN != 0 {
             buffer.push(0);
         }
@@ -693,13 +559,10 @@ impl Tuple for BlockTuple {
         // header
         buffer[..size_of::<BlockTupleHeader>()].copy_from_slice(
             BlockTupleHeader {
-                bitwidth_document_ids_0: self.bitwidth_document_ids_0,
-                bitwidth_document_ids_1: self.bitwidth_document_ids_1,
+                bitwidth_document_ids: self.bitwidth_document_ids,
                 bitwidth_term_frequencies: self.bitwidth_term_frequencies,
-                compressed_document_ids_0_s,
-                compressed_document_ids_0_e,
-                compressed_document_ids_1_s,
-                compressed_document_ids_1_e,
+                compressed_document_ids_s,
+                compressed_document_ids_e,
                 compressed_term_frequencies_s,
                 compressed_term_frequencies_e,
                 _padding_0: Default::default(),
@@ -716,13 +579,9 @@ impl WithReader for BlockTuple {
     fn deserialize_ref(source: &[u8]) -> BlockTupleReader<'_> {
         let checker = RefChecker::new(source);
         let header: &BlockTupleHeader = checker.prefix(0_u16);
-        let compressed_document_ids_0 = checker.bytes(
-            header.compressed_document_ids_0_s,
-            header.compressed_document_ids_0_e,
-        );
-        let compressed_document_ids_1 = checker.bytes(
-            header.compressed_document_ids_1_s,
-            header.compressed_document_ids_1_e,
+        let compressed_document_ids = checker.bytes(
+            header.compressed_document_ids_s,
+            header.compressed_document_ids_e,
         );
         let compressed_term_frequencies = checker.bytes(
             header.compressed_term_frequencies_s,
@@ -730,8 +589,7 @@ impl WithReader for BlockTuple {
         );
         BlockTupleReader {
             header,
-            compressed_document_ids_0,
-            compressed_document_ids_1,
+            compressed_document_ids,
             compressed_term_frequencies,
         }
     }
@@ -740,26 +598,19 @@ impl WithReader for BlockTuple {
 #[derive(Debug, Clone, Copy)]
 pub struct BlockTupleReader<'a> {
     header: &'a BlockTupleHeader,
-    compressed_document_ids_0: &'a [u8],
-    compressed_document_ids_1: &'a [u8],
+    compressed_document_ids: &'a [u8],
     compressed_term_frequencies: &'a [u8],
 }
 
 impl<'a> BlockTupleReader<'a> {
-    pub fn bitwidth_document_ids_0(self) -> u8 {
-        self.header.bitwidth_document_ids_0
-    }
-    pub fn bitwidth_document_ids_1(self) -> u8 {
-        self.header.bitwidth_document_ids_1
+    pub fn bitwidth_document_ids(self) -> u8 {
+        self.header.bitwidth_document_ids
     }
     pub fn bitwidth_term_frequencies(self) -> u8 {
         self.header.bitwidth_term_frequencies
     }
-    pub fn compressed_document_ids_0(self) -> &'a [u8] {
-        self.compressed_document_ids_0
-    }
-    pub fn compressed_document_ids_1(self) -> &'a [u8] {
-        self.compressed_document_ids_1
+    pub fn compressed_document_ids(self) -> &'a [u8] {
+        self.compressed_document_ids
     }
     pub fn compressed_term_frequencies(self) -> &'a [u8] {
         self.compressed_term_frequencies
@@ -781,86 +632,79 @@ impl<'a> BlockTupleReader<'a> {
     Immutable,
     KnownLayout,
 )]
-pub struct Pointer(U48);
+pub struct Pointer {
+    x: u32,
+    y: u16,
+    _padding_0: [Padding; 2],
+}
 
 impl Pointer {
     pub fn new((x, y): (u32, u16)) -> Self {
-        Self(U48::from_pair((x, y)))
+        Self {
+            x,
+            y,
+            _padding_0: Default::default(),
+        }
     }
     pub fn into_inner(self) -> (u32, u16) {
-        self.0.to_pair()
+        (self.x, self.y)
     }
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
-pub struct U32Index0 {
-    key: [u8; size_of::<u32>()],
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    IntoBytes,
+    FromBytes,
+    Immutable,
+    KnownLayout,
+)]
+pub struct Index0 {
+    key: u32,
     val: Pointer,
 }
 
-impl U32Index0 {
+impl Index0 {
     pub fn new((key, val): (u32, Pointer)) -> Self {
-        Self {
-            key: u32::to_ne_bytes(key),
-            val,
-        }
-    }
-    pub fn into_inner(self) -> (u32, Pointer) {
-        (u32::from_ne_bytes(self.key), self.val)
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
-pub struct U32Index1 {
-    key: u32,
-    val: u32,
-}
-
-impl U32Index1 {
-    pub fn new((key, val): (u32, u32)) -> Self {
         Self { key, val }
     }
-    pub fn into_inner(self) -> (u32, u32) {
+    pub fn into_inner(self) -> (u32, Pointer) {
         (self.key, self.val)
     }
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
-pub struct U48Index0 {
-    key: U48,
-    val: U48,
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    IntoBytes,
+    FromBytes,
+    Immutable,
+    KnownLayout,
+)]
+pub struct Index1 {
+    key: u32,
+    val: u32,
 }
 
-impl U48Index0 {
-    pub fn new((key, val): (U48, Pointer)) -> Self {
-        Self {
-            key,
-            val: U48::from_pair(val.into_inner()),
-        }
+impl Index1 {
+    pub fn new((key, val): (u32, u32)) -> Self {
+        Self { key, val }
     }
-    pub fn into_inner(self) -> (U48, Pointer) {
-        (self.key, Pointer::new(self.val.to_pair()))
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
-pub struct U48Index1 {
-    key: U48,
-    val: [u8; size_of::<u32>()],
-}
-
-impl U48Index1 {
-    pub fn new((key, val): (U48, u32)) -> Self {
-        Self {
-            key,
-            val: val.to_ne_bytes(),
-        }
-    }
-    pub fn into_inner(self) -> (U48, u32) {
-        (self.key, u32::from_ne_bytes(self.val))
+    pub fn into_inner(self) -> (u32, u32) {
+        (self.key, self.val)
     }
 }
