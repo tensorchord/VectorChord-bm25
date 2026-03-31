@@ -12,50 +12,15 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::segment::Segment;
 use crate::tape::TapeWriter;
 use crate::tuples::{
-    BlockTuple, DocumentTuple, MetaTuple, Pointer, SegmentTuple, SummaryTuple, TokenTuple,
+    BlockTuple, DocumentTuple, JumpTuple, MetaTuple, Pointer, SummaryTuple, TokenTuple, VectorTuple,
 };
 use crate::types::Bm25IndexOptions;
-use crate::vector::Bm25VectorBorrowed;
-use crate::{Opaque, compression, guide, tf};
+use crate::{Opaque, compression, tf, tree};
 use index::relation::{Page, RelationWrite};
-use std::collections::BTreeMap;
-use std::iter::zip;
-
-pub struct Segment {
-    documents: Vec<(u32, [u16; 3])>,
-    tokens: BTreeMap<u32, Vec<(u32, u32)>>,
-    sum_of_document_lengths: u64,
-}
-
-impl Segment {
-    pub fn new() -> Self {
-        Self {
-            documents: Vec::new(),
-            tokens: BTreeMap::new(),
-            sum_of_document_lengths: 0,
-        }
-    }
-    pub fn push(&mut self, document: Bm25VectorBorrowed<'_>, payload: [u16; 3]) {
-        let i = self.documents.len();
-        let Ok(i) = u32::try_from(i) else {
-            panic!("number of documents exceeds {}", u32::MAX - 1);
-        };
-        let norm = document.norm();
-        self.documents.push((norm, payload));
-        for (&key, &val) in zip(document.indexes(), document.values()) {
-            self.tokens.entry(key).or_default().push((i, val));
-        }
-        self.sum_of_document_lengths += norm as u64;
-    }
-}
-
-impl Default for Segment {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+use index::tuples::Bool;
 
 pub fn build<R: RelationWrite>(bm25_options: Bm25IndexOptions, index: &R, builder: Segment)
 where
@@ -66,29 +31,31 @@ where
 
     let documents = builder.documents;
     let tokens = builder.tokens;
-    let sum_of_document_lengths = builder.sum_of_document_lengths;
+    let sum_of_document_lengths = documents.iter().map(|&(norm, _)| norm as u64).sum();
 
-    let mut meta = TapeWriter::<_, MetaTuple>::create(index, false);
+    let mut meta = TapeWriter::<_, MetaTuple>::create(index);
     assert_eq!(meta.first(), 0);
 
     let avgdl = sum_of_document_lengths as f64 / documents.len() as f64;
 
-    let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index, false);
+    let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index);
     let mut map_documents = Vec::new();
     for (document_id, &(document_length, payload)) in documents.iter().enumerate() {
         map_documents.push((
             document_id as u32,
             tape_documents.push(DocumentTuple {
+                id: document_id as u32,
                 length: document_length,
                 payload,
+                deleted: Bool::FALSE,
             }),
         ));
     }
     let length = |i: u32| documents[i as usize].0;
 
-    let mut tape_blocks = TapeWriter::<_, BlockTuple>::create(index, false);
-    let mut tape_summaries = TapeWriter::<_, SummaryTuple>::create(index, false);
-    let mut tape_tokens = TapeWriter::<_, TokenTuple>::create(index, false);
+    let mut tape_blocks = TapeWriter::<_, BlockTuple>::create(index);
+    let mut tape_summaries = TapeWriter::<_, SummaryTuple>::create(index);
+    let mut tape_tokens = TapeWriter::<_, TokenTuple>::create(index);
     let mut map_tokens = Vec::new();
     for (&token_id, val) in tokens.iter() {
         let number_of_documents: u32 = val.len() as u32;
@@ -129,6 +96,7 @@ where
         map_tokens.push((
             token_id,
             tape_tokens.push(TokenTuple {
+                id: token_id,
                 number_of_documents,
                 wand_document_length: token_wand.document_length(),
                 wand_term_frequency: token_wand.term_frequency(),
@@ -137,40 +105,61 @@ where
         ));
     }
 
-    let mut tape_segments = TapeWriter::<_, SegmentTuple>::create(index, false);
-    let wptr_segment = tape_segments.push(SegmentTuple {
+    let tape_vectors = TapeWriter::<_, VectorTuple>::create(index);
+
+    let mut tape_jump = TapeWriter::<_, JumpTuple>::create(index);
+    let (root_documents, depth_documents, free_documents) = tree::write(index, &map_documents);
+    let (root_tokens, depth_tokens, free_tokens) = tree::write(index, &map_tokens);
+    let ptr_jump = tape_jump.push(JumpTuple {
+        ptr_vectors: { tape_vectors }.first(),
         number_of_documents: documents.len() as _,
         number_of_tokens: tokens.len() as _,
         sum_of_document_lengths,
-        iptr_documents: guide::write(index, &map_documents),
-        iptr_tokens: guide::write(index, &map_tokens),
-        sptr_summaries: { tape_summaries }.first(),
-        sptr_blocks: { tape_blocks }.first(),
+        root_documents,
+        depth_documents,
+        free_documents,
+        root_tokens,
+        depth_tokens,
+        free_tokens,
+        ptr_documents: { tape_documents }.first(),
+        ptr_tokens: { tape_tokens }.first(),
+        ptr_summaries: { tape_summaries }.first(),
+        ptr_blocks: { tape_blocks }.first(),
     });
-    assert_eq!(wptr_segment.1, 1);
+    assert_eq!(ptr_jump.1, 1);
+
+    let tape_lock = TapeWriter::<_, ()>::create(index);
 
     meta.push(MetaTuple {
         k1,
         b,
-        wptr_segment: wptr_segment.0,
+        ptr_lock: { tape_lock }.first(),
+        ptr_jump: ptr_jump.0,
     });
 }
 
-struct Wand {
+pub(crate) struct Wand {
     tf: f64,
     document_length: u32,
     term_frequency: u32,
 }
 
 impl Wand {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tf: 0.0f64,
             document_length: u32::MAX,
             term_frequency: 0_u32,
         }
     }
-    fn push(&mut self, k1: f64, b: f64, avgdl: f64, document_length: u32, term_frequency: u32) {
+    pub(crate) fn push(
+        &mut self,
+        k1: f64,
+        b: f64,
+        avgdl: f64,
+        document_length: u32,
+        term_frequency: u32,
+    ) {
         let tf = tf(k1, b, avgdl, document_length, term_frequency);
         if self.tf < tf {
             self.tf = tf;
@@ -178,17 +167,17 @@ impl Wand {
             self.term_frequency = term_frequency;
         }
     }
-    fn extend(&mut self, other: &Self) {
+    pub(crate) fn extend(&mut self, other: &Self) {
         if self.tf < other.tf {
             self.tf = other.tf;
             self.document_length = other.document_length;
             self.term_frequency = other.term_frequency;
         }
     }
-    fn document_length(&self) -> u32 {
+    pub(crate) fn document_length(&self) -> u32 {
         self.document_length
     }
-    fn term_frequency(&self) -> u32 {
+    pub(crate) fn term_frequency(&self) -> u32 {
         self.term_frequency
     }
 }

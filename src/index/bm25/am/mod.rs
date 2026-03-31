@@ -15,6 +15,7 @@
 mod am_build;
 mod am_vacuumcleanup;
 
+use crate::datatype::memory_bm25vector::Bm25VectorInput;
 use crate::index::bm25::scanners::{DefaultBuilder, SearchOptions};
 use crate::index::fetcher::*;
 use crate::index::gucs;
@@ -232,35 +233,68 @@ pub unsafe extern "C-unwind" fn amcostestimate(
     }
 }
 
-#[cfg(any(
-    feature = "pg14",
-    feature = "pg15",
-    feature = "pg16",
-    feature = "pg17",
-    feature = "pg18"
-))]
 #[pgrx::pg_guard]
 pub unsafe extern "C-unwind" fn aminsert(
-    _index_relation: pgrx::pg_sys::Relation,
-    _values: *mut Datum,
-    _is_null: *mut bool,
-    _heap_tid: pgrx::pg_sys::ItemPointer,
+    index_relation: pgrx::pg_sys::Relation,
+    values: *mut Datum,
+    is_null: *mut bool,
+    heap_tid: pgrx::pg_sys::ItemPointer,
     _heap_relation: pgrx::pg_sys::Relation,
     _check_unique: pgrx::pg_sys::IndexUniqueCheck::Type,
     _index_unchanged: bool,
     _index_info: *mut pgrx::pg_sys::IndexInfo,
 ) -> bool {
-    unimplemented!()
+    let index = unsafe { PostgresRelation::new(index_relation) };
+    let value = unsafe { (!is_null.add(0).read()).then_some(values.add(0).read()) };
+    let ctid = unsafe { heap_tid.read() };
+    let document = 'block: {
+        use pgrx::datum::FromDatum;
+        let Some(datum) = value else {
+            break 'block None;
+        };
+        if datum.is_null() {
+            break 'block None;
+        }
+        let vector = unsafe { Bm25VectorInput::from_datum(datum, false).unwrap() };
+        Some(vector.as_borrowed().own())
+    };
+    if let Some(document) = document {
+        bm25::insert(&index, document.as_borrowed(), ctid_to_key(ctid));
+    }
+    false
 }
 
 #[pgrx::pg_guard]
 pub unsafe extern "C-unwind" fn ambulkdelete(
-    _info: *mut pgrx::pg_sys::IndexVacuumInfo,
-    _stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
-    _callback: pgrx::pg_sys::IndexBulkDeleteCallback,
-    _callback_state: *mut std::os::raw::c_void,
+    info: *mut pgrx::pg_sys::IndexVacuumInfo,
+    stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
+    callback: pgrx::pg_sys::IndexBulkDeleteCallback,
+    callback_state: *mut std::os::raw::c_void,
 ) -> *mut pgrx::pg_sys::IndexBulkDeleteResult {
-    unimplemented!()
+    use pgrx::pg_sys::ffi::pg_guard_ffi_boundary;
+    let mut stats = stats;
+    if stats.is_null() {
+        stats = unsafe {
+            pgrx::pg_sys::palloc0(size_of::<pgrx::pg_sys::IndexBulkDeleteResult>()).cast()
+        };
+    }
+    let index = unsafe { PostgresRelation::new((*info).index) };
+    let check = || unsafe {
+        #[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16", feature = "pg17"))]
+        pgrx::pg_sys::vacuum_delay_point();
+        #[cfg(feature = "pg18")]
+        pgrx::pg_sys::vacuum_delay_point(false);
+    };
+    let callback = callback.expect("null function pointer");
+    let callback = |key: [u16; 3]| {
+        let mut ctid = key_to_ctid(key);
+        #[allow(ffi_unwind_calls, reason = "protected by pg_guard_ffi_boundary")]
+        unsafe {
+            pg_guard_ffi_boundary(|| callback(&mut ctid, callback_state))
+        }
+    };
+    bm25::bulkdelete(&index, check, callback);
+    stats
 }
 
 #[pgrx::pg_guard]
@@ -275,7 +309,6 @@ pub unsafe extern "C-unwind" fn ambeginscan(
     let scanner: Scanner = Scanner {
         hack: None,
         scanning: LazyCell::new(Box::new(|| Box::new(std::iter::empty()))),
-        bump: Box::new(bumpalo::Bump::new()),
     };
     unsafe {
         (*scan).opaque = CurrentMemoryContext.leak_and_drop_on_delete(scanner).cast();
@@ -305,7 +338,6 @@ pub unsafe extern "C-unwind" fn amrescan(
         }
         let scanner = &mut *(*scan).opaque.cast::<Scanner>();
         scanner.scanning = LazyCell::new(Box::new(|| Box::new(std::iter::empty())));
-        scanner.bump.reset();
         let index = PostgresRelation::new((*scan).indexRelation);
         let options = SearchOptions {
             limit: gucs::bm25_limit((*scan).indexRelation),
@@ -327,8 +359,6 @@ pub unsafe extern "C-unwind" fn amrescan(
                 )
             })
         };
-        // PAY ATTENTATION: `scanning` references `bump`, so `scanning` must be dropped before `bump`.
-        let bump = scanner.bump.as_ref();
         scanner.scanning = {
             let mut builder = DefaultBuilder::new(());
             for i in 0..(*scan).numberOfOrderBys {
@@ -343,11 +373,7 @@ pub unsafe extern "C-unwind" fn amrescan(
                 let is_null = ((*data).sk_flags & pgrx::pg_sys::SK_ISNULL as i32) != 0;
                 builder.add((*data).sk_strategy, (!is_null).then_some(value));
             }
-            LazyCell::new(Box::new(move || {
-                // only do this since `PostgresRelation` has no destructor
-                let index = bump.alloc(index.clone());
-                builder.build(index, options, fetcher, bump)
-            }))
+            LazyCell::new(Box::new(move || builder.build(index, options, fetcher)))
         };
     }
 }
@@ -385,7 +411,6 @@ pub unsafe extern "C-unwind" fn amgettuple(
 pub unsafe extern "C-unwind" fn amendscan(scan: pgrx::pg_sys::IndexScanDesc) {
     let scanner = unsafe { &mut *(*scan).opaque.cast::<Scanner>() };
     scanner.scanning = LazyCell::new(Box::new(|| Box::new(std::iter::empty())));
-    scanner.bump.reset();
 }
 
 type Iter = Box<dyn Iterator<Item = (f64, [u16; 3], bool)>>;
@@ -393,5 +418,4 @@ type Iter = Box<dyn Iterator<Item = (f64, [u16; 3], bool)>>;
 pub struct Scanner {
     pub hack: Option<NonNull<pgrx::pg_sys::IndexScanState>>,
     scanning: LazyCell<Iter, Box<dyn FnOnce() -> Iter>>,
-    bump: Box<bumpalo::Bump>,
 }

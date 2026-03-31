@@ -12,9 +12,9 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::tuples::{MetaTuple, SegmentTuple, TokenTuple, WithReader};
+use crate::tuples::{JumpTuple, MetaTuple, TokenTuple, WithReader};
 use crate::vector::Bm25VectorBorrowed;
-use crate::{Opaque, guide, idf, tf};
+use crate::{Opaque, idf, tf, tree};
 use index::relation::{Page, RelationRead};
 use score::Score;
 
@@ -31,22 +31,27 @@ where
     let meta_tuple = MetaTuple::deserialize_ref(meta_bytes);
     let k1 = meta_tuple.k1();
     let b = meta_tuple.b();
-    let ptr_segment = meta_tuple.wptr_segment();
+    let ptr_jump = meta_tuple.ptr_jump();
     drop(meta_guard);
+
+    let jump_guard = index.read(ptr_jump);
+    let jump_bytes = jump_guard.get(1).expect("data corruption");
+    let jump_tuple = JumpTuple::deserialize_ref(jump_bytes);
 
     let document_length = document.norm();
 
-    let segment_guard = index.read(ptr_segment);
-    let segment_bytes = segment_guard.get(1).expect("data corruption");
-    let segment_tuple = SegmentTuple::deserialize_ref(segment_bytes);
-
-    let sum_of_document_lengths = segment_tuple.sum_of_document_lengths();
-    let number_of_documents = segment_tuple.number_of_documents();
+    let sum_of_document_lengths = jump_tuple.sum_of_document_lengths();
+    let number_of_documents = jump_tuple.number_of_documents();
     let avgdl = sum_of_document_lengths as f64 / number_of_documents as f64;
 
     let mut result = 0.0;
     for (key, value) in meet(document, query) {
-        let Some(token) = guide::read(index, segment_tuple.iptr_tokens(), key) else {
+        let Some(token) = tree::read(
+            index,
+            jump_tuple.root_tokens(),
+            jump_tuple.depth_tokens(),
+            key,
+        ) else {
             continue;
         };
         let token_guard = index.read(token.0);

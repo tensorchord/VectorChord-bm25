@@ -18,8 +18,7 @@ use crate::index::fetcher::*;
 use crate::index::scanners::SearchBuilder;
 use always_equal::AlwaysEqual;
 use bm25::vector::Bm25VectorOwned;
-use index::bump::Bump;
-use index::relation::{Page, RelationPrefetch, RelationRead, RelationReadStream};
+use index::relation::{Page, RelationRead};
 use pgrx::heap_tuple::PgHeapTuple;
 use std::cmp::Reverse;
 use std::num::NonZero;
@@ -71,13 +70,12 @@ impl SearchBuilder for DefaultBuilder {
 
     fn build<'b, R>(
         self,
-        index: &'b R,
+        index: R,
         options: SearchOptions,
         mut fetcher: impl Fetcher + 'b,
-        _bump: &'b impl Bump,
     ) -> Box<dyn Iterator<Item = (f64, [u16; 3], bool)> + 'b>
     where
-        R: RelationRead + RelationPrefetch + RelationReadStream,
+        R: RelationRead,
         R::Page: Page<Opaque = bm25::Opaque>,
     {
         let mut vector = None;
@@ -95,9 +93,9 @@ impl SearchBuilder for DefaultBuilder {
             pgrx::error!("number of needed rows is set to 0");
         };
         let result = if !options.prefilter {
-            bm25::search(index, limit, vector.as_borrowed(), |_| true)
+            bm25::search(&index, limit, vector.as_borrowed(), |_| true)
         } else {
-            bm25::search(index, limit, vector.as_borrowed(), |pointer| {
+            bm25::search(&index, limit, vector.as_borrowed(), |pointer| {
                 let Some(mut tuple) = fetcher.fetch(pointer) else {
                     return false;
                 };

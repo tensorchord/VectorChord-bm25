@@ -12,10 +12,27 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::index::storage::PostgresRelation;
+
 #[pgrx::pg_guard]
 pub unsafe extern "C-unwind" fn amvacuumcleanup(
-    _info: *mut pgrx::pg_sys::IndexVacuumInfo,
-    _stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
+    info: *mut pgrx::pg_sys::IndexVacuumInfo,
+    stats: *mut pgrx::pg_sys::IndexBulkDeleteResult,
 ) -> *mut pgrx::pg_sys::IndexBulkDeleteResult {
-    unimplemented!()
+    let mut stats = stats;
+    if stats.is_null() {
+        stats = unsafe {
+            pgrx::pg_sys::palloc0(size_of::<pgrx::pg_sys::IndexBulkDeleteResult>()).cast()
+        };
+    }
+    let index_relation = unsafe { (*info).index };
+    let index = unsafe { PostgresRelation::new(index_relation) };
+    let check = || unsafe {
+        #[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16", feature = "pg17"))]
+        pgrx::pg_sys::vacuum_delay_point();
+        #[cfg(feature = "pg18")]
+        pgrx::pg_sys::vacuum_delay_point(false);
+    };
+    bm25::maintain(&index, check);
+    stats
 }

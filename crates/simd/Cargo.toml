@@ -8,8 +8,9 @@ publish = false
 init = []
 
 [dependencies]
+simd_macros = { path = "../simd_macros" }
+
 seq-macro = "0.3.6"
-simd_macros.workspace = true
 zerocopy.workspace = true
 
 [dev-dependencies]

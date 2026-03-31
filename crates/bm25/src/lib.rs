@@ -13,32 +13,39 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 mod build;
+mod bulkdelete;
 mod compression;
 mod evaluate;
-mod guide;
+mod insert;
+mod maintain;
 mod search;
+mod segment;
 mod tape;
+mod tree;
 mod tuples;
 
 pub mod types;
 pub mod vector;
 
-use index::tuples::Padding;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
 pub struct Opaque {
     pub next: u32,
-    _padding_0: [Padding; 4],
+    pub index: u32,
 }
 
 #[allow(unsafe_code)]
 unsafe impl index::relation::Opaque for Opaque {}
 
-pub use build::{Segment, build};
+pub use build::build;
+pub use bulkdelete::bulkdelete;
 pub use evaluate::evaluate;
+pub use insert::insert;
+pub use maintain::maintain;
 pub use search::search;
+pub use segment::Segment;
 
 fn idf(number_of_documents: u32, token_number_of_documents: u32) -> f64 {
     let number_of_documents = number_of_documents as f64;

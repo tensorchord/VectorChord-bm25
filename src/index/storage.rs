@@ -12,18 +12,29 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use index::fetch::Fetch;
 use index::relation::{
-    Hints, Opaque, Page, PageGuard, ReadStream, Relation, RelationPrefetch, RelationRead,
-    RelationReadStream, RelationReadStreamTypes, RelationReadTypes, RelationWrite,
-    RelationWriteTypes,
+    Opaque, Page, PageGuard, Relation, RelationPrefetch, RelationRead, RelationReadTypes,
+    RelationWrite, RelationWriteTypes,
 };
-use std::collections::VecDeque;
-use std::iter::{Chain, Flatten};
 use std::marker::PhantomData;
 use std::mem::{MaybeUninit, offset_of};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
+
+pub trait IndexOpaque: Opaque {
+    fn index_opaque(&self) -> &u32;
+    fn index_opaque_mut(&mut self) -> &mut u32;
+}
+
+impl IndexOpaque for bm25::Opaque {
+    fn index_opaque(&self) -> &u32 {
+        &self.index
+    }
+
+    fn index_opaque_mut(&mut self) -> &mut u32 {
+        &mut self.index
+    }
+}
 
 #[repr(C, align(8))]
 #[derive(Debug)]
@@ -202,12 +213,10 @@ impl<Opaque> Drop for PostgresBufferReadGuard<Opaque> {
 }
 
 pub struct PostgresBufferWriteGuard<O: Opaque> {
-    raw: pgrx::pg_sys::Relation,
     buf: i32,
     page: NonNull<PostgresPage<O>>,
     state: *mut pgrx::pg_sys::GenericXLogState,
     id: u32,
-    tracking_freespace: bool,
 }
 
 impl<O: Opaque> PageGuard for PostgresBufferWriteGuard<O> {
@@ -236,10 +245,6 @@ impl<O: Opaque> Drop for PostgresBufferWriteGuard<O> {
             if std::thread::panicking() {
                 pgrx::pg_sys::GenericXLogAbort(self.state);
             } else {
-                if self.tracking_freespace {
-                    pgrx::pg_sys::RecordPageWithFreeSpace(self.raw, self.id, self.freespace() as _);
-                    pgrx::pg_sys::FreeSpaceMapVacuumRange(self.raw, self.id, self.id + 1);
-                }
                 pgrx::pg_sys::GenericXLogFinish(self.state);
             }
             pgrx::pg_sys::UnlockReleaseBuffer(self.buf);
@@ -247,7 +252,7 @@ impl<O: Opaque> Drop for PostgresBufferWriteGuard<O> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PostgresRelation<Opaque> {
     raw: pgrx::pg_sys::Relation,
     _phantom: PhantomData<fn(Opaque) -> Opaque>,
@@ -296,8 +301,8 @@ impl<O: Opaque> RelationWriteTypes for PostgresRelation<O> {
     type WriteGuard<'a> = PostgresBufferWriteGuard<O>;
 }
 
-impl<O: Opaque> RelationWrite for PostgresRelation<O> {
-    fn write(&self, id: u32, tracking_freespace: bool) -> PostgresBufferWriteGuard<O> {
+impl<O: IndexOpaque> RelationWrite for PostgresRelation<O> {
+    fn write(&self, id: u32) -> PostgresBufferWriteGuard<O> {
         assert!(id != u32::MAX, "no such page");
         unsafe {
             use pgrx::pg_sys::{
@@ -318,24 +323,51 @@ impl<O: Opaque> RelationWrite for PostgresRelation<O> {
             )
             .expect("failed to get page");
             PostgresBufferWriteGuard {
-                raw: self.raw,
                 buf,
                 page: page.cast(),
                 state,
                 id,
-                tracking_freespace,
             }
         }
     }
-    fn extend(
-        &self,
-        opaque: <Self::Page as Page>::Opaque,
-        tracking_freespace: bool,
-    ) -> PostgresBufferWriteGuard<O> {
+    fn alloc(&self, opaque: <Self::Page as Page>::Opaque) -> PostgresBufferWriteGuard<O> {
         unsafe {
             use pgrx::pg_sys::{
                 GENERIC_XLOG_FULL_IMAGE, GenericXLogRegisterBuffer, GenericXLogStart,
             };
+            loop {
+                use pgrx::pg_sys::{
+                    BUFFER_LOCK_UNLOCK, BufferGetPage, ConditionalLockBuffer, LockBuffer,
+                    PageIsNew, ReadBuffer, ReleaseBuffer,
+                };
+                let blkno = pgrx::pg_sys::GetFreeIndexPage(self.raw);
+                if blkno == pgrx::pg_sys::InvalidBlockNumber {
+                    break;
+                }
+                let buffer = ReadBuffer(self.raw, blkno);
+                if ConditionalLockBuffer(buffer) {
+                    let page = BufferGetPage(buffer);
+                    if PageIsNew(page) || {
+                        let page = page.cast::<PostgresPage<O>>();
+                        *IndexOpaque::index_opaque((*page).get_opaque()) == 1
+                    } {
+                        let state = GenericXLogStart(self.raw);
+                        let page = NonNull::new(
+                            GenericXLogRegisterBuffer(state, buffer, 0)
+                                .cast::<MaybeUninit<PostgresPage<O>>>(),
+                        )
+                        .expect("failed to get page");
+                        return PostgresBufferWriteGuard {
+                            buf: buffer,
+                            page: page.cast(),
+                            state,
+                            id: pgrx::pg_sys::BufferGetBlockNumber(buffer),
+                        };
+                    }
+                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK as _);
+                }
+                ReleaseBuffer(buffer);
+            }
             let buf;
             #[cfg(any(feature = "pg14", feature = "pg15"))]
             {
@@ -380,31 +412,24 @@ impl<O: Opaque> RelationWrite for PostgresRelation<O> {
             .expect("failed to get page");
             page_init(page.as_mut().as_mut_ptr(), opaque);
             PostgresBufferWriteGuard {
-                raw: self.raw,
                 buf,
                 page: page.cast(),
                 state,
                 id: pgrx::pg_sys::BufferGetBlockNumber(buf),
-                tracking_freespace,
             }
         }
     }
-    fn search(&self, freespace: usize) -> Option<PostgresBufferWriteGuard<O>> {
-        unsafe {
-            loop {
-                let id = pgrx::pg_sys::GetPageWithFreeSpace(self.raw, freespace);
-                if id == u32::MAX {
-                    return None;
-                }
-                let write = self.write(id, true);
-                if write.freespace() < freespace as _ {
-                    // the free space is recorded incorrectly
-                    pgrx::pg_sys::RecordPageWithFreeSpace(self.raw, id, write.freespace() as _);
-                    pgrx::pg_sys::FreeSpaceMapVacuumRange(self.raw, id, id + 1);
-                    continue;
-                }
-                return Some(write);
+    fn bulkfree(&self, ids: &[u32]) {
+        for &id in ids {
+            assert!(id != u32::MAX, "no such page");
+            let mut guard = self.write(id);
+            *IndexOpaque::index_opaque_mut(guard.get_opaque_mut()) = 1;
+            unsafe {
+                pgrx::pg_sys::RecordFreeIndexPage(self.raw, id);
             }
+        }
+        unsafe {
+            pgrx::pg_sys::IndexFreeSpaceMapVacuum(self.raw);
         }
     }
 }
@@ -415,277 +440,6 @@ impl<O: Opaque> RelationPrefetch for PostgresRelation<O> {
         unsafe {
             use pgrx::pg_sys::PrefetchBuffer;
             PrefetchBuffer(self.raw, 0, id);
-        }
-    }
-}
-
-pub struct Cache<'b, I: Iterator> {
-    window: VecDeque<I::Item>,
-    tail: VecDeque<u32>,
-    iter: Option<I>,
-    _phantom: PhantomData<&'b mut ()>,
-}
-
-impl<'b, I: Iterator> Default for Cache<'b, I> {
-    fn default() -> Self {
-        Self {
-            window: Default::default(),
-            tail: Default::default(),
-            iter: Default::default(),
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<'b, I: Iterator> Cache<'b, I>
-where
-    I::Item: Fetch<'b>,
-{
-    #[allow(dead_code)]
-    pub fn pop_id(&mut self) -> Option<u32> {
-        while self.tail.is_empty()
-            && let Some(iter) = self.iter.as_mut()
-            && let Some(e) = iter.next()
-        {
-            for id in e.fetch() {
-                self.tail.push_back(id);
-            }
-            self.window.push_back(e);
-        }
-        self.tail.pop_front()
-    }
-    #[allow(dead_code)]
-    pub fn pop_item_if(&mut self, predicate: impl FnOnce(&I::Item) -> bool) -> Option<I::Item> {
-        while self.window.is_empty()
-            && let Some(iter) = self.iter.as_mut()
-            && let Some(e) = iter.next()
-        {
-            for id in e.fetch() {
-                self.tail.push_back(id);
-            }
-            self.window.push_back(e);
-        }
-        self.window.pop_front_if(move |x| predicate(x))
-    }
-    #[allow(dead_code)]
-    pub fn pop_item(&mut self) -> Option<I::Item> {
-        while self.window.is_empty()
-            && let Some(iter) = self.iter.as_mut()
-            && let Some(e) = iter.next()
-        {
-            for id in e.fetch() {
-                self.tail.push_back(id);
-            }
-            self.window.push_back(e);
-        }
-        self.window.pop_front()
-    }
-}
-
-pub struct PostgresReadStream<'b, O: Opaque, I: Iterator> {
-    #[cfg(any(feature = "pg17", feature = "pg18"))]
-    raw: *mut pgrx::pg_sys::ReadStream,
-    // Because of `Box`'s special alias rules, `Box` cannot be used here.
-    cache: NonNull<Cache<'b, I>>,
-    _phantom: PhantomData<fn(O) -> O>,
-}
-
-pub struct PostgresReadStreamGuards<O, I, L> {
-    #[cfg(any(feature = "pg17", feature = "pg18"))]
-    raw: *mut pgrx::pg_sys::ReadStream,
-    list: L,
-    _phantom: PhantomData<fn(O, I) -> (O, I)>,
-}
-
-impl<O: Opaque, I: Iterator, L> Iterator for PostgresReadStreamGuards<O, I, L>
-where
-    L: Iterator<Item = u32>,
-{
-    type Item = PostgresBufferReadGuard<O>;
-
-    #[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16"))]
-    fn next(&mut self) -> Option<Self::Item> {
-        unimplemented!()
-    }
-
-    #[cfg(any(feature = "pg17", feature = "pg18"))]
-    fn next(&mut self) -> Option<Self::Item> {
-        let _id = self.list.next()?;
-        unsafe {
-            use pgrx::pg_sys::{
-                BUFFER_LOCK_SHARE, BufferGetPage, LockBuffer, read_stream_next_buffer,
-            };
-            let buf = read_stream_next_buffer(self.raw, core::ptr::null_mut());
-            LockBuffer(buf, BUFFER_LOCK_SHARE as _);
-            let page = NonNull::new(BufferGetPage(buf).cast()).expect("failed to get page");
-            Some(PostgresBufferReadGuard {
-                buf,
-                page,
-                id: pgrx::pg_sys::BufferGetBlockNumber(buf),
-            })
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.list.size_hint()
-    }
-}
-
-impl<O: Opaque, I: Iterator, L> ExactSizeIterator for PostgresReadStreamGuards<O, I, L> where
-    L: ExactSizeIterator<Item = u32>
-{
-}
-
-#[cfg(any(feature = "pg17", feature = "pg18"))]
-impl<'b, O: Opaque, I: Iterator> PostgresReadStream<'b, O, I>
-where
-    I::Item: Fetch<'b>,
-{
-    fn read<L: Iterator<Item = u32>>(&mut self, fetch: L) -> PostgresReadStreamGuards<O, I, L> {
-        PostgresReadStreamGuards {
-            raw: self.raw,
-            list: fetch,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<'b, O: Opaque, I: Iterator> ReadStream<'b> for PostgresReadStream<'b, O, I>
-where
-    I::Item: Fetch<'b>,
-{
-    type Relation = PostgresRelation<O>;
-
-    type Guards = PostgresReadStreamGuards<O, I, <I::Item as Fetch<'b>>::Iter>;
-
-    type Item = I::Item;
-
-    type Inner =
-        Chain<std::collections::vec_deque::IntoIter<I::Item>, Flatten<std::option::IntoIter<I>>>;
-
-    #[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16"))]
-    fn next(&mut self) -> Option<(I::Item, Self::Guards)> {
-        panic!("read_stream is not supported on PostgreSQL versions earlier than 17.");
-    }
-
-    #[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16"))]
-    fn next_if<P: FnOnce(&I::Item) -> bool>(
-        &mut self,
-        _predicate: P,
-    ) -> Option<(I::Item, Self::Guards)> {
-        panic!("read_stream is not supported on PostgreSQL versions earlier than 17.");
-    }
-
-    #[cfg(any(feature = "pg17", feature = "pg18"))]
-    fn next(&mut self) -> Option<(I::Item, Self::Guards)> {
-        if let Some(e) = unsafe { self.cache.as_mut().pop_item() } {
-            let list = self.read(e.fetch());
-            Some((e, list))
-        } else {
-            None
-        }
-    }
-
-    #[cfg(any(feature = "pg17", feature = "pg18"))]
-    fn next_if<P: FnOnce(&I::Item) -> bool>(
-        &mut self,
-        predicate: P,
-    ) -> Option<(I::Item, Self::Guards)> {
-        if let Some(e) = unsafe { self.cache.as_mut().pop_item_if(predicate) } {
-            let list = self.read(e.fetch());
-            Some((e, list))
-        } else {
-            None
-        }
-    }
-
-    fn into_inner(mut self) -> Self::Inner {
-        let cache = unsafe { std::mem::take(self.cache.as_mut()) };
-        cache
-            .window
-            .into_iter()
-            .chain(cache.iter.into_iter().flatten())
-    }
-}
-
-impl<'b, O: Opaque, I: Iterator> Drop for PostgresReadStream<'b, O, I> {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = std::mem::take(self.cache.as_mut());
-            #[cfg(any(feature = "pg17", feature = "pg18"))]
-            if !std::thread::panicking() && pgrx::pg_sys::IsTransactionState() {
-                pgrx::pg_sys::read_stream_end(self.raw);
-            }
-            let _ = box_from_non_null(self.cache);
-        }
-    }
-}
-
-impl<O: Opaque> RelationReadStreamTypes for PostgresRelation<O> {
-    type ReadStream<'b, I: Iterator>
-        = PostgresReadStream<'b, O, I>
-    where
-        I::Item: Fetch<'b>;
-}
-
-impl<O: Opaque> RelationReadStream for PostgresRelation<O> {
-    #[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16"))]
-    fn read_stream<'b, I: Iterator>(&'b self, _iter: I, _hints: Hints) -> Self::ReadStream<'b, I>
-    where
-        I::Item: Fetch<'b>,
-    {
-        panic!("read_stream is not supported on PostgreSQL versions earlier than 17.");
-    }
-
-    #[cfg(any(feature = "pg17", feature = "pg18"))]
-    fn read_stream<'b, I: Iterator>(&'b self, iter: I, hints: Hints) -> Self::ReadStream<'b, I>
-    where
-        I::Item: Fetch<'b>,
-    {
-        #[pgrx::pg_guard]
-        unsafe extern "C-unwind" fn callback<'b, I: Iterator>(
-            _stream: *mut pgrx::pg_sys::ReadStream,
-            callback_private_data: *mut core::ffi::c_void,
-            _per_buffer_data: *mut core::ffi::c_void,
-        ) -> pgrx::pg_sys::BlockNumber
-        where
-            I::Item: Fetch<'b>,
-        {
-            unsafe {
-                use pgrx::pg_sys::InvalidBlockNumber;
-                let inner = callback_private_data.cast::<Cache<I>>();
-                (*inner).pop_id().unwrap_or(InvalidBlockNumber)
-            }
-        }
-        let cache = box_into_non_null(Box::new(Cache {
-            window: VecDeque::new(),
-            tail: VecDeque::new(),
-            iter: Some(iter),
-            _phantom: PhantomData,
-        }));
-        let raw = unsafe {
-            let mut flags = pgrx::pg_sys::READ_STREAM_DEFAULT;
-            if hints.full {
-                flags |= pgrx::pg_sys::READ_STREAM_FULL;
-            }
-            #[cfg(feature = "pg18")]
-            if hints.batch {
-                flags |= pgrx::pg_sys::READ_STREAM_USE_BATCHING;
-            }
-            pgrx::pg_sys::read_stream_begin_relation(
-                flags as i32,
-                core::ptr::null_mut(),
-                self.raw,
-                pgrx::pg_sys::ForkNumber::MAIN_FORKNUM,
-                Some(callback::<I>),
-                cache.as_ptr().cast(),
-                0,
-            )
-        };
-        PostgresReadStream {
-            raw,
-            cache,
-            _phantom: PhantomData,
         }
     }
 }
@@ -703,9 +457,4 @@ fn lp_flags(x: pgrx::pg_sys::ItemIdData) -> u32 {
 #[must_use]
 fn box_into_non_null<T>(b: Box<T>) -> NonNull<T> {
     unsafe { NonNull::new_unchecked(Box::into_raw(b)) }
-}
-
-#[must_use]
-unsafe fn box_from_non_null<T>(ptr: NonNull<T>) -> Box<T> {
-    unsafe { Box::from_raw(ptr.as_ptr()) }
 }

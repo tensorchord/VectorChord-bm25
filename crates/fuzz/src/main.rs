@@ -31,12 +31,18 @@ const INIT_DOCUMENTS: u32 = 10000;
 const DOCUMENT_MAX_TOKEN: u32 = 10000;
 const DOCUMENT_LEN: u32 = 100;
 
-const FUZZ_ITERATIONS: u32 = 500;
-const FUZZ_OPERATIONS: [Operation; 1] = [
-    // Operation::Insert,
+const FUZZ_ITERATIONS: u32 = 5000;
+const FUZZ_OPERATIONS: &[Operation] = &[
+    Operation::Insert,
+    Operation::Insert,
     Operation::Select,
-    // Operation::Delete,
-    // Operation::Vacuum,
+    Operation::Select,
+    Operation::Select,
+    Operation::Select,
+    Operation::Delete,
+    Operation::Delete,
+    Operation::Delete,
+    Operation::Vacuum,
 ];
 
 fn test(client: &mut postgres::Client) {
@@ -138,6 +144,7 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
     client.execute("SET enable_seqscan = off", &[]).unwrap();
     client.execute("SET bm25.enable_scan = on", &[]).unwrap();
     client.execute("SET \"bm25.limit\" = 200", &[]).unwrap();
+    client.execute("SET bm25.prefilter = on", &[]).unwrap();
 
     let restuple = client
         .query(
