@@ -55,7 +55,7 @@ SET "bm25.limit" = 10;
 statement ok
 SELECT id
 FROM documents
-ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('PostgreSQL', 'tokenizer1')::bm25vector)
+ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('PostgreSQL', 'tokenizer1'))
 LIMIT 10;
 
 statement ok
