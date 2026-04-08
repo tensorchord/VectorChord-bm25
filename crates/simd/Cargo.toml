@@ -1,0 +1,20 @@
+[package]
+name = "simd"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+init = []
+
+[dependencies]
+simd_macros = { path = "../simd_macros" }
+
+seq-macro = "0.3.6"
+zerocopy.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+
+[lints]
+workspace = true

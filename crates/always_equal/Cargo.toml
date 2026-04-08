@@ -1,0 +1,8 @@
+[package]
+name = "always_equal"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lints]
+workspace = true

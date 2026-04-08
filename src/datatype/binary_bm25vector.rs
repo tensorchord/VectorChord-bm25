@@ -1,52 +1,75 @@
-use std::ffi::c_char;
+// This software is licensed under a dual license model:
+//
+// GNU Affero General Public License v3 (AGPLv3): You may use, modify, and
+// distribute this software under the terms of the AGPLv3.
+//
+// Elastic License v2 (ELv2): You may also use, modify, and distribute this
+// software under the Elastic License v2, which has specific restrictions.
+//
+// We welcome any commercial collaboration or support. For inquiries
+// regarding the licenses, please contact us at:
+// vectorchord-inquiry@tensorchord.ai
+//
+// Copyright (c) 2025-2026 TensorChord Inc.
 
-use pgrx::IntoDatum;
-use pgrx::{pg_sys::Oid, Internal};
-
-use crate::datatype::bm25vector::Bm25VectorBorrowed;
-
-use super::bytea::Bytea;
-use super::memory_bm25vector::Bm25VectorInput;
-use super::memory_bm25vector::Bm25VectorOutput;
+use crate::datatype::memory_bm25vector::{Bm25VectorInput, Bm25VectorOutput};
+use bm25::vector::Bm25VectorBorrowed;
+use pgrx::datum::Internal;
+use pgrx::pg_sys::Oid;
 
 #[pgrx::pg_extern(immutable, strict, parallel_safe)]
-fn _bm25catalog_bm25vector_send(vector: Bm25VectorInput<'_>) -> Bytea {
-    use pgrx::pg_sys::StringInfoData;
-    let vector = vector.borrow();
-    unsafe {
-        let mut buf = StringInfoData::default();
-        let len = vector.len();
-        let b_indexes = size_of::<u32>() * vector.len() as usize;
-        let b_values = size_of::<u32>() * vector.len() as usize;
-        pgrx::pg_sys::pq_begintypsend(&mut buf);
-        pgrx::pg_sys::pq_sendbytes(&mut buf, (&len) as *const u32 as _, 4);
-        pgrx::pg_sys::pq_sendbytes(&mut buf, (&vector.doc_len()) as *const u32 as _, 4);
-        pgrx::pg_sys::pq_sendbytes(&mut buf, vector.indexes().as_ptr() as _, b_indexes as _);
-        pgrx::pg_sys::pq_sendbytes(&mut buf, vector.values().as_ptr() as _, b_values as _);
-        Bytea::new(pgrx::pg_sys::pq_endtypsend(&mut buf))
+fn _vchord_bm25_bm25vector_send(vector: Bm25VectorInput<'_>) -> Vec<u8> {
+    let vector = vector.as_borrowed();
+    let mut stream = Vec::<u8>::new();
+    stream.extend(vector.len().to_be_bytes());
+    for &c in vector.indexes() {
+        stream.extend(c.to_be_bytes());
     }
+    for &c in vector.values() {
+        stream.extend(c.to_be_bytes());
+    }
+    stream
 }
 
 #[pgrx::pg_extern(immutable, strict, parallel_safe)]
-fn _bm25catalog_bm25vector_recv(internal: Internal, _oid: Oid, _typmod: i32) -> Bm25VectorOutput {
-    use pgrx::pg_sys::StringInfo;
-    unsafe {
-        let buf: StringInfo = internal.into_datum().unwrap().cast_mut_ptr();
-        let len = (pgrx::pg_sys::pq_getmsgbytes(buf, 4) as *const u32).read_unaligned() as usize;
-        let doc_len = (pgrx::pg_sys::pq_getmsgbytes(buf, 4) as *const u32).read_unaligned();
+fn _vchord_bm25_bm25vector_recv(mut internal: Internal, oid: Oid, typmod: i32) -> Bm25VectorOutput {
+    let _ = (oid, typmod);
+    let buf = unsafe { internal.get_mut::<pgrx::pg_sys::StringInfoData>().unwrap() };
 
-        let b_all = 2 * size_of::<u32>() * len;
-        let p_all = pgrx::pg_sys::pq_getmsgbytes(buf, b_all as _);
-        let mut all_aligned = Vec::<u32>::with_capacity(2 * len);
-        std::ptr::copy_nonoverlapping(p_all, all_aligned.as_mut_ptr().cast::<c_char>(), b_all);
-        all_aligned.set_len(2 * len);
-
-        if let Some(vector) =
-            Bm25VectorBorrowed::new_checked(doc_len, &all_aligned[..len], &all_aligned[len..])
-        {
-            Bm25VectorOutput::new(vector)
-        } else {
-            pgrx::error!("detect data corruption");
+    let len = {
+        assert!(buf.cursor < i32::MAX - 4 && buf.cursor + 4 <= buf.len);
+        let raw = unsafe { buf.data.add(buf.cursor as _).cast::<[u8; 4]>().read() };
+        buf.cursor += 4;
+        u32::from_be_bytes(raw)
+    };
+    let indexes = {
+        let mut result = Vec::new();
+        for _ in 0..len {
+            result.push({
+                assert!(buf.cursor < i32::MAX - 4 && buf.cursor + 4 <= buf.len);
+                let raw = unsafe { buf.data.add(buf.cursor as _).cast::<[u8; 4]>().read() };
+                buf.cursor += 4;
+                u32::from_be_bytes(raw)
+            });
         }
+        result
+    };
+    let values = {
+        let mut result = Vec::new();
+        for _ in 0..len {
+            result.push({
+                assert!(buf.cursor < i32::MAX - 4 && buf.cursor + 4 <= buf.len);
+                let raw = unsafe { buf.data.add(buf.cursor as _).cast::<[u8; 4]>().read() };
+                buf.cursor += 4;
+                u32::from_be_bytes(raw)
+            });
+        }
+        result
+    };
+
+    if let Some(vector) = Bm25VectorBorrowed::new_checked(&indexes, &values) {
+        Bm25VectorOutput::new(vector)
+    } else {
+        pgrx::error!("detect data corruption");
     }
 }

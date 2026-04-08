@@ -6,7 +6,7 @@ CREATE TABLE documents (
 );
 
 statement ok
-SELECT create_text_analyzer('text_analyzer1', $$
+SELECT tokenizer_catalog.create_text_analyzer('text_analyzer1', $$
 pre_tokenizer = "unicode_segmentation"
 [[character_filters]]
 to_lowercase = {}
@@ -21,7 +21,7 @@ stemmer = "english_porter2"
 $$);
 
 statement ok
-SELECT create_custom_model_tokenizer_and_trigger(
+SELECT tokenizer_catalog.create_custom_model_tokenizer_and_trigger(
     tokenizer_name => 'tokenizer1',
     model_name => 'model1',
     text_analyzer_name => 'text_analyzer1',
@@ -47,38 +47,25 @@ statement ok
 CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
+SET enable_seqscan = off;
+
+statement ok
+SET "bm25.limit" = 10;
+
+statement ok
+SELECT id
 FROM documents
-ORDER BY rank
+ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('PostgreSQL', 'tokenizer1')::bm25vector)
 LIMIT 10;
 
 statement ok
-SET enable_seqscan=off;
+SELECT tokenizer_catalog.drop_tokenizer('tokenizer1');
 
 statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
-FROM documents
-ORDER BY rank
-LIMIT 10;
+SELECT tokenizer_catalog.drop_text_analyzer('text_analyzer1');
 
 statement ok
-INSERT INTO documents (passage) VALUES 
-('vchord_bm25 is a postgresql extension for bm25 ranking algorithm.');
-
-statement ok
-SELECT id, passage, embedding <&> to_bm25query('documents_embedding_bm25', tokenize('PostgreSQL', 'tokenizer1')) AS rank
-FROM documents
-ORDER BY rank
-LIMIT 10;
+SELECT tokenizer_catalog.drop_custom_model('model1');
 
 statement ok
 DROP TABLE documents;
-
-statement ok
-SELECT drop_tokenizer('tokenizer_bert');
-
-statement ok
-SELECT drop_text_analyzer('text_analyzer1');
-
-statement ok
-SELECT drop_custom_model('model1');

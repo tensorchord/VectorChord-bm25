@@ -1,9 +1,11 @@
 [package]
 name = "vchord_bm25"
-version = "0.2.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+publish = false
 
 [lib]
+name = "vchord_bm25"
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
@@ -11,48 +13,82 @@ name = "pgrx_embed_vchord_bm25"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]
-pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
-pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
-pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
-pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
-pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
-pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
-pg_test = ["dep:rand"]
+default = ["simd/init"]
+pg14 = ["pgrx/pg14"]
+pg15 = ["pgrx/pg15"]
+pg16 = ["pgrx/pg16"]
+pg17 = ["pgrx/pg17"]
+pg18 = ["pgrx/pg18"]
 
 [dependencies]
-arrayvec = "0.7.6"
-bitflags = "2.10.0"
-bitpacking = { version = "0.9", default-features = false, features = [
-    "bitpacker4x",
-] }
-bytemuck = "1.24"
-generator = "0.8.7"
-lending-iterator = "0.1.7"
-pgrx = "=0.16.1"
-serde = { version = "1.0.217", features = ["derive"] }
-thiserror = "2"
+always_equal = { path = "./crates/always_equal" }
+bm25 = { path = "./crates/bm25" }
+index = { path = "./crates/index" }
+simd = { path = "./crates/simd" }
 
-# used for `pg_test` and `test`
-rand = { version = "0.9", optional = true }
+pgrx = "=0.17.0"
+pgrx-catalog = "0.3.2"
+serde.workspace = true
+toml = "1.1.2"
+validator.workspace = true
 
-[dev-dependencies]
-pgrx-tests = "=0.16.1"
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "linux", target_os = "macos")))'.dependencies]
+mimalloc = { version = "0.1.48", features = ["local_dynamic_tls"] }
+
+[lints]
+workspace = true
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+
+[workspace.dependencies]
+rand = "0.10.0"
+serde = { version = "1.0.228", features = ["derive"] }
+validator = { version = "0.20.0", features = ["derive"] }
+zerocopy = { version = "0.8.48", features = ["derive", "simd"] }
+
+[workspace.lints]
+# complexity
+clippy.identity_op = "allow"
+clippy.manual_is_multiple_of = "allow"
+clippy.nonminimal_bool = "allow"
+clippy.too_many_arguments = "allow"
+clippy.type_complexity = "allow"
+# style
+clippy.collapsible_if = "allow"
+clippy.just_underscores_and_digits = "allow"
+clippy.needless_range_loop = "allow"
+clippy.new_without_default = "allow"
+# unsafe
+rust.unsafe_code = "deny"
+rust.unsafe_op_in_unsafe_fn = "deny"
+# unused
+rust.unused_extern_crates = "warn"
+rust.unused_import_braces = "warn"
+rust.unused_lifetimes = "warn"
+rust.unused_macro_rules = "warn"
+rust.unused_qualifications = "warn"
+
+[profile.dev]
+codegen-units = 256
+lto = "off"
+opt-level = 1
+debug = "full"
+strip = "none"
 
 [profile.release]
-lto = "fat"
 codegen-units = 1
-
-[profile.dev-opt]
-inherits = "dev"
+lto = "fat"
 opt-level = 3
-lto = "thin"
-codegen-units = 8
+debug = "none"
+strip = "symbols"
 
-[lints.clippy]
-manual_is_multiple_of = "allow"
-missing_safety_doc = "allow"
-new_without_default = "allow"
-not_unsafe_ptr_arg_deref = "allow"
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(pgrx_embed)'] }
+[profile.prof]
+inherits = "release"
+debug = "full"
+strip = "none"
