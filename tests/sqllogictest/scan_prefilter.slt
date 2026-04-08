@@ -44,7 +44,7 @@ WITH results AS (
   SELECT id
   FROM documents
   WHERE condition = TRUE
-  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert')::bm25vector)
+  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert'))
   LIMIT 10
 )
 SELECT COUNT(1) FROM results;
@@ -59,7 +59,7 @@ WITH results AS (
   SELECT id
   FROM documents
   WHERE condition = TRUE
-  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert')::bm25vector)
+  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', tokenizer_catalog.tokenize('Post', 'tokenizer_bert'))
   LIMIT 10
 )
 SELECT COUNT(1) FROM results;
