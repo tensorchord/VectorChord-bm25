@@ -35,7 +35,7 @@ where
     pub fn create(index: &'a R) -> Self {
         let head = index.alloc(Opaque {
             next: u32::MAX,
-            index: 0,
+            flags: 0,
         });
         let first = head.id();
         Self {
@@ -66,7 +66,7 @@ where
         }
         let next = self.index.alloc(Opaque {
             next: u32::MAX,
-            index: 0,
+            flags: 0,
         });
         self.head.get_opaque_mut().next = next.id();
         self.head = next;
@@ -86,7 +86,7 @@ where
         } else {
             let next = self.index.alloc(Opaque {
                 next: u32::MAX,
-                index: 0,
+                flags: 0,
             });
             self.head.get_opaque_mut().next = next.id();
             self.head = next;
@@ -124,7 +124,7 @@ where
     pub fn create(index: &'a R) -> Self {
         let head = index.alloc(Opaque {
             next: u32::MAX,
-            index: 0,
+            flags: 0,
         });
         Self {
             head,
@@ -144,7 +144,7 @@ where
         }
         self.head = self.index.alloc(Opaque {
             next: self.head.id(),
-            index: 0,
+            flags: 0,
         });
     }
 }

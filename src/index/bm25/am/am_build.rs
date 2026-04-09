@@ -138,7 +138,7 @@ pub unsafe extern "C-unwind" fn ambuild(
             std::ptr::null_mut(),
         )
     };
-    let mut segment = bm25::Segment::new();
+    let mut collector = bm25::Collector::new();
     let mut indtuples = 0_u64;
     traverser.traverse(true, |tuple: &mut dyn crate::index::traverse::Tuple| {
         let ctid = tuple.id();
@@ -156,11 +156,12 @@ pub unsafe extern "C-unwind" fn ambuild(
             Some(vector.as_borrowed().own())
         };
         if let Some(document) = document {
-            segment.push(document.as_borrowed(), ctid_to_key(ctid));
+            collector.push(document.as_borrowed(), ctid_to_key(ctid));
             indtuples += 1;
             reporter.tuples_done(indtuples);
         }
     });
+    let segment = collector.finish();
     bm25::build(bm25_options.index, &index, segment);
     unsafe { pgrx::pgbox::PgBox::<pgrx::pg_sys::IndexBuildResult>::alloc0().into_pg() }
 }

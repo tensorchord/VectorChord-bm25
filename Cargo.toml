@@ -3,6 +3,7 @@ name = "vchord_bm25"
 version.workspace = true
 edition.workspace = true
 publish = false
+autotests = false
 
 [lib]
 name = "vchord_bm25"

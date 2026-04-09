@@ -19,17 +19,32 @@ use std::iter::zip;
 
 #[pgrx::pg_extern(immutable, strict, parallel_safe)]
 fn _vchord_bm25_bm25vector_cast_intarray_bm25vector(input: Array<'_, i32>) -> Bm25VectorOutput {
-    let mut input = input.as_slice().expect("input contains nulls").to_vec();
-    input.sort_unstable();
+    let mut intarray = input
+        .as_slice()
+        .expect("input contains nulls")
+        .iter()
+        .map(|&x| x as u32)
+        .collect::<Vec<_>>();
+    intarray.sort_unstable();
+    let mut last = Option::<(u32, u32)>::None;
     let mut indexes = Vec::new();
     let mut values = Vec::new();
-    for x in input {
-        if indexes.last().copied() == Some(x as u32) {
-            *values.last_mut().unwrap() += 1;
+    for index in intarray {
+        if let Some((last_index, last_value)) = last {
+            if last_index == index {
+                last = Some((last_index, last_value + 1));
+            } else {
+                indexes.push(last_index);
+                values.push(last_value);
+                last = Some((index, 1_u32));
+            }
         } else {
-            indexes.push(x as u32);
-            values.push(1_u32);
+            last = Some((index, 1_u32));
         }
+    }
+    if let Some((last_index, last_value)) = last {
+        indexes.push(last_index);
+        values.push(last_value);
     }
     let vector = Bm25VectorBorrowed::new(&indexes, &values);
     Bm25VectorOutput::new(vector)

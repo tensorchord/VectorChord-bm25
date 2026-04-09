@@ -1,0 +1,64 @@
+statement ok
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    passage TEXT,
+    embedding bm25vector,
+    condition BOOLEAN DEFAULT FALSE
+);
+
+statement ok
+INSERT INTO documents (passage, embedding) VALUES
+('PostgreSQL is a powerful, open-source object-relational database system. It has over 15 years of active development.', '{1010:1, 1011:2, 1012:2, 1037:1, 1997:1, 2003:1, 2009:1, 2015:1, 2038:1, 2058:1, 2086:1, 2140:1, 2291:1, 2321:1, 2330:1, 2458:1, 2695:1, 3120:1, 3161:1, 3928:1, 4160:1, 4874:1, 7809:1, 17603:1, 28771:1}'),
+('Full-text search is a technique for searching in plain-text documents or textual database fields. PostgreSQL supports this with tsvector.', '{1011:2, 1012:2, 1037:1, 1999:1, 2003:1, 2005:1, 2007:1, 2015:1, 2023:1, 2030:1, 2140:1, 2440:1, 2695:1, 3726:1, 3793:2, 3945:1, 4160:1, 4249:1, 5491:1, 5810:1, 6028:1, 6575:1, 6753:1, 7809:1, 16761:1, 17603:1, 24529:1, 25304:1}'),
+('BM25 is a ranking function used by search engines to estimate the relevance of documents to a given search query.', '{1012:1, 1037:2, 1038:1, 1996:1, 1997:1, 2000:2, 2003:1, 2011:1, 2109:1, 2213:1, 2445:1, 3853:1, 3945:2, 5209:1, 5464:1, 5491:1, 10197:1, 17788:1, 21923:1, 23032:1}'),
+('PostgreSQL provides many advanced features like full-text search, window functions, and more.', '{1010:2, 1011:1, 1012:1, 1998:1, 2015:1, 2062:1, 2066:1, 2116:1, 2140:1, 2440:1, 2695:1, 2838:1, 3332:1, 3640:1, 3793:1, 3935:1, 3945:1, 4160:1, 4972:1, 17603:1}'),
+('Search and ranking in databases are important in building effective information retrieval systems.', '{1012:1, 1998:1, 1999:2, 2024:1, 2311:1, 2590:1, 2592:1, 3001:1, 3945:1, 4621:1, 5464:1, 17881:1, 26384:1}'),
+('The BM25 ranking algorithm is derived from the probabilistic retrieval framework.', '{1012:1, 1038:1, 1996:2, 2003:1, 2013:1, 2213:1, 3676:1, 4013:1, 4588:1, 5173:1, 5464:1, 7705:1, 9896:1, 17788:1, 26384:1, 27965:1}'),
+('Full-text search indexes documents to allow fast text queries. PostgreSQL supports this through its GIN and GiST indexes.', '{1011:1, 1012:2, 1998:1,2000:1, 2015:1, 2023:1, 2049:1, 2083:1, 2140:1, 2229:2, 2440:1, 2695:1, 3367:1, 3435:1, 3499:1, 3793:2, 3945:1, 4160:1, 5134:1, 5491:1, 5950:2, 6753:1, 10861:1, 17603:1, 18353:1, 21025:1}'),
+('The PostgreSQL community is active and regularly improves the database system.', '{1012:1, 1996:2, 1998:1, 2003:1, 2015:1, 2140:1, 2291:1, 2451:1, 2695:1, 3161:1, 4160:1, 5570:1, 7809:1, 17603:1, 24840:1}'),
+('Relational databases such as PostgreSQL can handle both structured and unstructured data.', '{1012:1, 1998:1, 2004:1, 2015:1, 2064:1, 2107:1, 2119:1, 2140:1, 2695:1, 2951:1, 3367:1, 4160:1, 4895:1, 5047:1, 14336:1, 17603:1, 17881:1, 26134:1, 28771:1}'),
+('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.', '{1010:2, 1012:1, 1038:1, 2004:1, 2011:1, 2107:1, 2213:1, 3463:1, 3945:2, 4621:1, 4824:1, 5335:1, 5464:1, 13792:1, 17788:1, 21923:1}');
+
+statement ok
+CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);
+
+statement ok
+SET enable_seqscan = off;
+
+statement ok
+SET "bm25.limit" = 3;
+
+statement ok
+UPDATE documents SET condition = True WHERE id % 2 = 0;
+
+# Post
+query I
+WITH results AS (
+  SELECT id
+  FROM documents
+  WHERE condition = TRUE
+  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', '{2695}'::int[])
+  LIMIT 10
+)
+SELECT COUNT(1) FROM results;
+----
+2
+
+statement ok
+SET bm25.prefilter = on;
+
+# Post
+query I
+WITH results AS (
+  SELECT id
+  FROM documents
+  WHERE condition = TRUE
+  ORDER BY embedding <&> to_bm25query('documents_embedding_bm25', '{2695}'::int[])
+  LIMIT 10
+)
+SELECT COUNT(1) FROM results;
+----
+3
+
+statement ok
+DROP TABLE documents;

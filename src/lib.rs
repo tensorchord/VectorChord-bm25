@@ -48,6 +48,9 @@ pgrx::extension_sql_file!("./sql/finalize.sql", finalize);
 #[pgrx::pg_guard]
 #[unsafe(export_name = "_PG_init")]
 unsafe extern "C-unwind" fn _pg_init() {
+    if !unsafe { pgrx::pg_sys::process_shared_preload_libraries_in_progress } {
+        pgrx::error!("vchord_bm25 must be loaded via shared_preload_libraries.");
+    }
     IS_MAIN.set(true);
     index::init();
     unsafe {
