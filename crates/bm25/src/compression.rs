@@ -12,6 +12,7 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::buf::Buf;
 use zerocopy::{FromBytes, IntoBytes, Unalign};
 
 pub fn compress_document_ids(min_document_id: u32, uncompressed: &[u32]) -> (u8, Vec<u8>) {
@@ -35,25 +36,26 @@ pub fn compress_document_ids(min_document_id: u32, uncompressed: &[u32]) -> (u8,
     }
 }
 
-pub fn decompress_document_ids(min_document_id: u32, bitwidth: u8, compressed: &[u8]) -> Vec<u32> {
+pub fn decompress_document_ids(
+    min_document_id: u32,
+    bitwidth: u8,
+    compressed: &[u8],
+    decompressed: &mut Buf,
+) {
     if bitwidth == u8::MAX {
         let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
-        let mut decompressed = Vec::<u32>::with_capacity(d.len());
-        #[allow(unsafe_code)]
-        unsafe {
-            core::ptr::copy_nonoverlapping(d.as_ptr(), decompressed.as_mut_ptr().cast(), d.len());
-            decompressed.set_len(d.len());
-        };
-        decompressed
+        let internal: &mut [Unalign<u32>; 128] =
+            zerocopy::transmute_mut!(&mut decompressed.internal);
+        internal[..d.len()].copy_from_slice(d);
+        decompressed.set_len(d.len() as u8);
     } else {
-        let mut decompressed = [0_u32; 128];
         simd::bitpacking_u32_ordered::decompress(
             min_document_id,
             bitwidth,
             compressed,
-            &mut decompressed,
+            &mut decompressed.internal,
         );
-        decompressed.to_vec()
+        decompressed.set_len(128);
     }
 }
 
@@ -72,19 +74,19 @@ pub fn compress_term_frequencies(uncompressed: &[u32]) -> (u8, Vec<u8>) {
     }
 }
 
-pub fn decompress_term_frequencies(bitwidth: u8, compressed: &[u8]) -> Vec<u32> {
+pub fn decompress_term_frequencies(bitwidth: u8, compressed: &[u8], decompressed: &mut Buf) {
     if bitwidth == u8::MAX {
         let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
-        let mut decompressed = Vec::<u32>::with_capacity(d.len());
-        #[allow(unsafe_code)]
-        unsafe {
-            core::ptr::copy_nonoverlapping(d.as_ptr(), decompressed.as_mut_ptr().cast(), d.len());
-            decompressed.set_len(d.len());
-        };
-        decompressed
+        let internal: &mut [Unalign<u32>; 128] =
+            zerocopy::transmute_mut!(&mut decompressed.internal);
+        internal[..d.len()].copy_from_slice(d);
+        decompressed.set_len(d.len() as u8);
     } else {
-        let mut decompressed = [0_u32; 128];
-        simd::bitpacking_u32_unordered::decompress(bitwidth, compressed, &mut decompressed);
-        decompressed.to_vec()
+        simd::bitpacking_u32_unordered::decompress(
+            bitwidth,
+            compressed,
+            &mut decompressed.internal,
+        );
+        decompressed.set_len(128);
     }
 }

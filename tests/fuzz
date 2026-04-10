@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 postgres = "0.19.12"
-rand = "0.10.0"
+rand = "0.10.1"
 ---
 
 // This software is licensed under a dual license model:

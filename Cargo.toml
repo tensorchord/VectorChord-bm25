@@ -48,7 +48,7 @@ version = "0.0.0"
 edition = "2024"
 
 [workspace.dependencies]
-rand = "0.10.0"
+rand = "0.10.1"
 serde = { version = "1.0.228", features = ["derive"] }
 validator = { version = "0.20.0", features = ["derive"] }
 zerocopy = { version = "0.8.48", features = ["derive", "simd"] }
