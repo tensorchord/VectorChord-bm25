@@ -1,3 +1,16 @@
+#!/usr/bin/env -S cargo +nightly -Zscript
+---cargo
+[package]
+name = "fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+postgres = "0.19.12"
+rand = "0.10.0"
+---
+
 // This software is licensed under a dual license model:
 //
 // GNU Affero General Public License v3 (AGPLv3): You may use, modify, and
@@ -45,12 +58,12 @@ const FUZZ_OPERATIONS: &[Operation] = &[
     Operation::Vacuum,
 ];
 
-fn test(client: &mut postgres::Client) {
+fn test(mut clients: Vec<postgres::Client>) {
     let seed = rand::rng().random_range(0..u64::MAX);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     println!("Seed: {}", seed); // for reproducibility
 
-    client
+    clients[0]
         .execute(
             r#"
         CREATE TABLE documents (
@@ -65,7 +78,7 @@ fn test(client: &mut postgres::Client) {
     // Insert initial documents
     for _ in 0..INIT_DOCUMENTS {
         let bm25vector = random_bm25vector(&mut rng);
-        client
+        clients[0]
             .execute(
                 r#"INSERT INTO documents (embedding) VALUES ($1::text::bm25vector);"#,
                 &[&bm25vector],
@@ -74,24 +87,70 @@ fn test(client: &mut postgres::Client) {
     }
 
     // Create index
-    client
+    clients[0]
         .execute(
             r#"CREATE INDEX documents_embedding_bm25 ON documents USING bm25 (embedding bm25_ops);"#,
             &[],
         )
         .unwrap();
 
-    for _ in 0..FUZZ_ITERATIONS {
-        let operation = FUZZ_OPERATIONS.choose(&mut rng).unwrap();
-        match operation {
-            Operation::Insert => fuzz_insert(client, &mut rng),
-            Operation::Select => fuzz_select(client, &mut rng),
-            Operation::Delete => fuzz_delete(client, &mut rng),
-            Operation::Vacuum => fuzz_vacuum(client, &mut rng),
+    if clients.len() == 1 {
+        for _ in 0..FUZZ_ITERATIONS {
+            {
+                let restuple = clients[0]
+                    .query(
+                        r#"SELECT pg_relation_size('documents_embedding_bm25')"#,
+                        &[],
+                    )
+                    .unwrap();
+                let relation_size = restuple[0].get::<_, i64>(0);
+                println!("relation_size = {relation_size}");
+            }
+            let operation = FUZZ_OPERATIONS.choose(&mut rng).unwrap();
+            println!("operation = {operation:?}");
+            match operation {
+                Operation::Insert => fuzz_insert(&mut clients[0], &mut rng),
+                Operation::Select => fuzz_select(&mut clients[0], &mut rng),
+                Operation::Delete => fuzz_delete(&mut clients[0], &mut rng),
+                Operation::Vacuum => fuzz_vacuum(&mut clients[0], &mut rng),
+            }
         }
+    } else {
+        let n = clients.len();
+        let threads = clients
+            .into_iter()
+            .map(|mut client| {
+                std::thread::spawn(move || {
+                    let mut rng = rand::rng();
+                    for _ in 0..FUZZ_ITERATIONS {
+                        let operation = FUZZ_OPERATIONS.choose(&mut rng).unwrap();
+                        static LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+                        match operation {
+                            Operation::Insert => fuzz_insert(&mut client, &mut rng),
+                            Operation::Select => {
+                                let _guard = LOCK.read().unwrap();
+                                fuzz_select(&mut client, &mut rng)
+                            }
+                            Operation::Delete => fuzz_delete(&mut client, &mut rng),
+                            Operation::Vacuum => {
+                                if rng.random_range(0..n) == 0 {
+                                    let _guard = LOCK.write().unwrap();
+                                    fuzz_vacuum(&mut client, &mut rng);
+                                }
+                            }
+                        }
+                    }
+                    client
+                })
+            })
+            .collect::<Vec<_>>();
+        clients = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
     }
 
-    client.execute(r#"DROP TABLE documents;"#, &[]).unwrap();
+    clients[0].execute(r#"DROP TABLE documents;"#, &[]).unwrap();
 }
 
 fn random_bm25vector(rng: &mut impl RngExt) -> String {
@@ -139,12 +198,27 @@ fn fuzz_insert(client: &mut postgres::Client, rng: &mut impl RngExt) {
 }
 
 fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
+    let mut client = client
+        .build_transaction()
+        .isolation_level(postgres::IsolationLevel::RepeatableRead)
+        .read_only(true)
+        .start()
+        .unwrap();
+
     let query_vector = random_bm25vector(rng);
 
-    client.execute("SET enable_seqscan = off", &[]).unwrap();
-    client.execute("SET bm25.enable_scan = on", &[]).unwrap();
-    client.execute("SET \"bm25.limit\" = 200", &[]).unwrap();
-    client.execute("SET bm25.prefilter = on", &[]).unwrap();
+    client
+        .execute("SET LOCAL enable_seqscan = off", &[])
+        .unwrap();
+    client
+        .execute("SET LOCAL bm25.enable_scan = on", &[])
+        .unwrap();
+    client
+        .execute("SET LOCAL \"bm25.limit\" = 200", &[])
+        .unwrap();
+    client
+        .execute("SET LOCAL bm25.prefilter = on", &[])
+        .unwrap();
 
     let restuple = client
         .query(
@@ -163,8 +237,12 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
         index_result_ranks.push(row.get::<_, f64>(1));
     }
 
-    client.execute("SET enable_seqscan = on", &[]).unwrap();
-    client.execute("SET bm25.enable_scan = off", &[]).unwrap();
+    client
+        .execute("SET LOCAL enable_seqscan = on", &[])
+        .unwrap();
+    client
+        .execute("SET LOCAL bm25.enable_scan = off", &[])
+        .unwrap();
 
     let restuple = client
         .query(
@@ -184,17 +262,21 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
     }
 
     if distance(&index_results, &seq_results) > 10 {
-        println!("Query = {query_vector}");
-        println!("Index =");
+        use std::io::Write;
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "Query = {query_vector}").unwrap();
+        writeln!(stdout, "Index =").unwrap();
         for (id, rank) in std::iter::zip(index_results, index_result_ranks) {
-            println!("  | {id} | {rank}");
+            writeln!(stdout, "  | {id} | {rank}").unwrap();
         }
-        println!("Seq =");
+        writeln!(stdout, "Seq =").unwrap();
         for (id, rank) in std::iter::zip(seq_results, seq_result_ranks) {
-            println!("  | {id} | {rank}");
+            writeln!(stdout, "  | {id} | {rank}").unwrap();
         }
         panic!("Index and Seq results do not match");
     }
+
+    client.commit().unwrap();
 }
 
 fn fuzz_delete(client: &mut postgres::Client, rng: &mut impl RngExt) {
@@ -233,6 +315,12 @@ fn distance<T: Eq>(a: &[T], b: &[T]) -> usize {
 
 fn main() {
     let params = std::env::args().nth(1).unwrap();
-    let mut client = postgres::Client::connect(&params, postgres::tls::NoTls).unwrap();
-    test(&mut client);
+    let num_threads = std::env::args()
+        .nth(2)
+        .and_then(|x| x.parse::<usize>().ok())
+        .unwrap_or(1);
+    let clients = (0..num_threads)
+        .map(|_| postgres::Client::connect(&params, postgres::tls::NoTls).unwrap())
+        .collect::<Vec<_>>();
+    test(clients);
 }

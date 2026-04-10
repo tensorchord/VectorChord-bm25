@@ -33,11 +33,20 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 #[derive(Debug, Clone, Copy, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
 pub struct Opaque {
     pub next: u32,
-    pub index: u32,
+    pub flags: u32,
 }
 
 #[allow(unsafe_code)]
-unsafe impl index::relation::Opaque for Opaque {}
+unsafe impl index::relation::Opaque for Opaque {
+    fn is_deleted(&self) -> bool {
+        const B: u32 = 1 << 0;
+        self.flags & B != 0
+    }
+    fn set_deleted(&mut self) {
+        const B: u32 = 1 << 0;
+        self.flags |= B;
+    }
+}
 
 pub use build::build;
 pub use bulkdelete::bulkdelete;
@@ -45,7 +54,7 @@ pub use evaluate::evaluate;
 pub use insert::insert;
 pub use maintain::maintain;
 pub use search::search;
-pub use segment::Segment;
+pub use segment::{Collector, Segment};
 
 fn idf(number_of_documents: u32, token_number_of_documents: u32) -> f64 {
     let number_of_documents = number_of_documents as f64;

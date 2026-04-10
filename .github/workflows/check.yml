@@ -156,7 +156,7 @@ jobs:
       - name: Set up Sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
-      - name: Install PostgreSQL & pg_tokenizer.rs
+      - name: Install PostgreSQL
         run: |
           sudo apt-get remove -y '^postgres.*' '^libpq.*'
           sudo apt-get purge -y '^postgres.*' '^libpq.*'
@@ -182,16 +182,11 @@ jobs:
             psql -c 'ALTER SYSTEM SET io_method = io_uring'
           fi
           psql -c 'ALTER SYSTEM SET max_worker_processes = 1024'
-          psql -c 'ALTER SYSTEM SET shared_preload_libraries = pg_tokenizer, vchord_bm25'
-          psql -c 'ALTER SYSTEM SET search_path = "\$user", public, tokenizer_catalog, bm25_catalog'
+          psql -c 'ALTER SYSTEM SET shared_preload_libraries = vchord_bm25'
           sudo systemctl stop postgresql
 
           pg_config
           echo PG_CONFIG=pg_config >> $GITHUB_ENV
-
-          mkdir ~/pg_tokenizer-install
-          curl -fsSL https://github.com/tensorchord/pg_tokenizer.rs/releases/download/${PG_TOKENIZER}/postgresql-${{ matrix.version }}-pg-tokenizer_${PG_TOKENIZER}-1_$(dpkg --print-architecture).deb -o ~/pg_tokenizer-install/pg_tokenizer.deb
-          sudo apt-get install -y ~/pg_tokenizer-install/pg_tokenizer.deb
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -216,7 +211,6 @@ jobs:
       - name: Service
         run: |
           sudo systemctl start postgresql
-          psql -c 'CREATE EXTENSION IF NOT EXISTS pg_tokenizer CASCADE;'
           psql -c 'CREATE EXTENSION IF NOT EXISTS vchord_bm25 CASCADE;'
 
       - name: SqlLogictest
@@ -225,7 +219,8 @@ jobs:
 
       - name: Fuzz
         run: |
-          cargo run -p fuzz -- "user=$(whoami) dbname=$(whoami) host=localhost"
+          rustup toolchain install nightly
+          ./tests/fuzz "user=$(whoami) dbname=$(whoami) host=localhost" $(nproc)
 
       - name: Logging
         if: always()

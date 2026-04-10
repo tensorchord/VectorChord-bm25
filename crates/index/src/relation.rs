@@ -19,7 +19,10 @@ use zerocopy::{FromBytes, IntoBytes};
 ///
 /// * `Opaque` must aligned to 8 bytes.
 #[allow(unsafe_code)]
-pub unsafe trait Opaque: Copy + Send + Sync + FromBytes + IntoBytes + 'static {}
+pub unsafe trait Opaque: Copy + Send + Sync + FromBytes + IntoBytes + 'static {
+    fn is_deleted(&self) -> bool;
+    fn set_deleted(&mut self);
+}
 
 pub trait Page: Sized + 'static {
     type Opaque: Opaque;
@@ -70,7 +73,8 @@ pub trait RelationWriteTypes: Relation {
 pub trait RelationWrite: RelationWriteTypes {
     fn write(&self, id: u32) -> Self::WriteGuard<'_>;
     fn alloc(&self, opaque: <Self::Page as Page>::Opaque) -> Self::WriteGuard<'_>;
-    fn bulkfree(&self, ids: &[u32]);
+    fn free(&self, guard: Self::WriteGuard<'_>);
+    fn vacuum(&self);
 }
 
 pub trait RelationPrefetch: Relation {

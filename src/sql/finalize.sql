@@ -23,6 +23,26 @@ CREATE CAST (bm25vector AS int[])
 
 -- List of operators
 
+CREATE OPERATOR = (
+    PROCEDURE = _vchord_bm25_bm25vector_operator_eq,
+    LEFTARG = bm25vector,
+    RIGHTARG = bm25vector,
+    COMMUTATOR = =,
+    NEGATOR = <>,
+	RESTRICT = eqsel,
+    JOIN = eqjoinsel
+);
+
+CREATE OPERATOR <> (
+    PROCEDURE = _vchord_bm25_bm25vector_operator_neq,
+    LEFTARG = bm25vector,
+    RIGHTARG = bm25vector,
+    COMMUTATOR = <>,
+    NEGATOR = =,
+	RESTRICT = neqsel,
+    JOIN = neqjoinsel
+);
+
 CREATE OPERATOR <&> (
     PROCEDURE = _bm25_evaluate,
     LEFTARG = bm25vector,

@@ -133,9 +133,7 @@ impl<'a> MetaTupleReader<'a> {
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct JumpTupleHeader {
     ptr_vectors: u32,
-    _padding_0: [Padding; 4],
     number_of_documents: u32,
-    number_of_tokens: u32,
     sum_of_document_lengths: u64,
     root_documents: u32,
     depth_documents: u32,
@@ -153,7 +151,6 @@ struct JumpTupleHeader {
 pub struct JumpTuple {
     pub ptr_vectors: u32,
     pub number_of_documents: u32,
-    pub number_of_tokens: u32,
     pub sum_of_document_lengths: u64,
     pub root_documents: u32,
     pub depth_documents: u32,
@@ -172,7 +169,6 @@ impl Tuple for JumpTuple {
         JumpTupleHeader {
             ptr_vectors: self.ptr_vectors,
             number_of_documents: self.number_of_documents,
-            number_of_tokens: self.number_of_tokens,
             sum_of_document_lengths: self.sum_of_document_lengths,
             root_documents: self.root_documents,
             depth_documents: self.depth_documents,
@@ -184,7 +180,6 @@ impl Tuple for JumpTuple {
             ptr_tokens: self.ptr_tokens,
             ptr_summaries: self.ptr_summaries,
             ptr_blocks: self.ptr_blocks,
-            _padding_0: Default::default(),
         }
         .as_bytes()
         .to_vec()
@@ -257,9 +252,6 @@ impl<'a> JumpTupleWriter<'a> {
     }
     pub fn number_of_documents(&mut self) -> &mut u32 {
         &mut self.header.number_of_documents
-    }
-    pub fn number_of_tokens(&mut self) -> &mut u32 {
-        &mut self.header.number_of_tokens
     }
     pub fn sum_of_document_lengths(&mut self) -> &mut u64 {
         &mut self.header.sum_of_document_lengths

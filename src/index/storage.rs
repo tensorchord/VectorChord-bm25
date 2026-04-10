@@ -21,21 +21,6 @@ use std::mem::{MaybeUninit, offset_of};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
-pub trait IndexOpaque: Opaque {
-    fn index_opaque(&self) -> &u32;
-    fn index_opaque_mut(&mut self) -> &mut u32;
-}
-
-impl IndexOpaque for bm25::Opaque {
-    fn index_opaque(&self) -> &u32 {
-        &self.index
-    }
-
-    fn index_opaque_mut(&mut self) -> &mut u32 {
-        &mut self.index
-    }
-}
-
 #[repr(C, align(8))]
 #[derive(Debug)]
 pub struct PostgresPage<O> {
@@ -301,7 +286,7 @@ impl<O: Opaque> RelationWriteTypes for PostgresRelation<O> {
     type WriteGuard<'a> = PostgresBufferWriteGuard<O>;
 }
 
-impl<O: IndexOpaque> RelationWrite for PostgresRelation<O> {
+impl<O: Opaque> RelationWrite for PostgresRelation<O> {
     fn write(&self, id: u32) -> PostgresBufferWriteGuard<O> {
         assert!(id != u32::MAX, "no such page");
         unsafe {
@@ -335,75 +320,69 @@ impl<O: IndexOpaque> RelationWrite for PostgresRelation<O> {
             use pgrx::pg_sys::{
                 GENERIC_XLOG_FULL_IMAGE, GenericXLogRegisterBuffer, GenericXLogStart,
             };
-            loop {
+            let buf = loop {
                 use pgrx::pg_sys::{
                     BUFFER_LOCK_UNLOCK, BufferGetPage, ConditionalLockBuffer, LockBuffer,
                     PageIsNew, ReadBuffer, ReleaseBuffer,
                 };
                 let blkno = pgrx::pg_sys::GetFreeIndexPage(self.raw);
                 if blkno == pgrx::pg_sys::InvalidBlockNumber {
-                    break;
+                    break None;
                 }
-                let buffer = ReadBuffer(self.raw, blkno);
-                if ConditionalLockBuffer(buffer) {
-                    let page = BufferGetPage(buffer);
-                    if PageIsNew(page) || {
-                        let page = page.cast::<PostgresPage<O>>();
-                        *IndexOpaque::index_opaque((*page).get_opaque()) == 1
-                    } {
-                        let state = GenericXLogStart(self.raw);
-                        let page = NonNull::new(
-                            GenericXLogRegisterBuffer(state, buffer, 0)
-                                .cast::<MaybeUninit<PostgresPage<O>>>(),
-                        )
-                        .expect("failed to get page");
-                        return PostgresBufferWriteGuard {
-                            buf: buffer,
-                            page: page.cast(),
-                            state,
-                            id: pgrx::pg_sys::BufferGetBlockNumber(buffer),
-                        };
+                let buf = ReadBuffer(self.raw, blkno);
+                if ConditionalLockBuffer(buf) {
+                    let page = BufferGetPage(buf);
+                    if PageIsNew(page) {
+                        break Some(buf);
                     }
-                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK as _);
+                    let page = page.cast::<PostgresPage<O>>();
+                    if (*page).get_opaque().is_deleted() {
+                        break Some(buf);
+                    }
+                    LockBuffer(buf, BUFFER_LOCK_UNLOCK as _);
                 }
-                ReleaseBuffer(buffer);
-            }
-            let buf;
-            #[cfg(any(feature = "pg14", feature = "pg15"))]
-            {
-                use pgrx::pg_sys::{
-                    BUFFER_LOCK_EXCLUSIVE, ExclusiveLock, ForkNumber, LockBuffer,
-                    LockRelationForExtension, ReadBufferExtended, ReadBufferMode,
-                    UnlockRelationForExtension,
-                };
-                LockRelationForExtension(self.raw, ExclusiveLock as _);
-                buf = ReadBufferExtended(
-                    self.raw,
-                    ForkNumber::MAIN_FORKNUM,
-                    u32::MAX,
-                    ReadBufferMode::RBM_NORMAL,
-                    std::ptr::null_mut(),
-                );
-                UnlockRelationForExtension(self.raw, ExclusiveLock as _);
-                LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE as _);
-            }
-            #[cfg(any(feature = "pg16", feature = "pg17", feature = "pg18"))]
-            {
-                use pgrx::pg_sys::{
-                    BufferManagerRelation, ExtendBufferedFlags, ExtendBufferedRel, ForkNumber,
-                };
-                let bmr = BufferManagerRelation {
-                    rel: self.raw,
-                    smgr: std::ptr::null_mut(),
-                    relpersistence: 0,
-                };
-                buf = ExtendBufferedRel(
-                    bmr,
-                    ForkNumber::MAIN_FORKNUM,
-                    std::ptr::null_mut(),
-                    ExtendBufferedFlags::EB_LOCK_FIRST as _,
-                );
-            }
+                ReleaseBuffer(buf);
+            };
+            let buf = if let Some(buf) = buf {
+                buf
+            } else {
+                #[cfg(any(feature = "pg14", feature = "pg15"))]
+                {
+                    use pgrx::pg_sys::{
+                        BUFFER_LOCK_EXCLUSIVE, ExclusiveLock, ForkNumber, LockBuffer,
+                        LockRelationForExtension, ReadBufferExtended, ReadBufferMode,
+                        UnlockRelationForExtension,
+                    };
+                    LockRelationForExtension(self.raw, ExclusiveLock as _);
+                    let buf = ReadBufferExtended(
+                        self.raw,
+                        ForkNumber::MAIN_FORKNUM,
+                        u32::MAX,
+                        ReadBufferMode::RBM_NORMAL,
+                        std::ptr::null_mut(),
+                    );
+                    UnlockRelationForExtension(self.raw, ExclusiveLock as _);
+                    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE as _);
+                    buf
+                }
+                #[cfg(any(feature = "pg16", feature = "pg17", feature = "pg18"))]
+                {
+                    use pgrx::pg_sys::{
+                        BufferManagerRelation, ExtendBufferedFlags, ExtendBufferedRel, ForkNumber,
+                    };
+                    let bmr = BufferManagerRelation {
+                        rel: self.raw,
+                        smgr: std::ptr::null_mut(),
+                        relpersistence: 0,
+                    };
+                    ExtendBufferedRel(
+                        bmr,
+                        ForkNumber::MAIN_FORKNUM,
+                        std::ptr::null_mut(),
+                        ExtendBufferedFlags::EB_LOCK_FIRST as _,
+                    )
+                }
+            };
             let state = GenericXLogStart(self.raw);
             let mut page = NonNull::new(
                 GenericXLogRegisterBuffer(state, buf, GENERIC_XLOG_FULL_IMAGE as _)
@@ -419,15 +398,13 @@ impl<O: IndexOpaque> RelationWrite for PostgresRelation<O> {
             }
         }
     }
-    fn bulkfree(&self, ids: &[u32]) {
-        for &id in ids {
-            assert!(id != u32::MAX, "no such page");
-            let mut guard = self.write(id);
-            *IndexOpaque::index_opaque_mut(guard.get_opaque_mut()) = 1;
-            unsafe {
-                pgrx::pg_sys::RecordFreeIndexPage(self.raw, id);
-            }
+    fn free(&self, mut guard: Self::WriteGuard<'_>) {
+        guard.get_opaque_mut().set_deleted();
+        unsafe {
+            pgrx::pg_sys::RecordFreeIndexPage(self.raw, guard.id());
         }
+    }
+    fn vacuum(&self) {
         unsafe {
             pgrx::pg_sys::IndexFreeSpaceMapVacuum(self.raw);
         }

@@ -15,4 +15,5 @@
 mod binary_bm25vector;
 mod casts_bm25vector;
 pub mod memory_bm25vector;
+mod operators_bm25vector;
 mod text_bm25vector;
