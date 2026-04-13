@@ -291,7 +291,7 @@ fn generate(
             .exports()?
             .into_iter()
             .flat_map(|x| std::str::from_utf8(x.name()))
-            .filter(|x| !["_start", "_IO_stdin_used", "main"].contains(x))
+            .filter(|&x| x != "main" && !x.starts_with("_"))
             .map(str::to_string)
             .collect::<Vec<String>>()
     } else {
