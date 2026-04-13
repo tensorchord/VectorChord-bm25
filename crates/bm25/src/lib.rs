@@ -12,6 +12,7 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+mod buf;
 mod build;
 mod bulkdelete;
 mod compression;

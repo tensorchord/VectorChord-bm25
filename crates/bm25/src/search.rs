@@ -12,6 +12,7 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::buf::Buf;
 use crate::tuples::*;
 use crate::vector::{Bm25VectorBorrowed, Bm25VectorOwned};
 use crate::{Opaque, compression, idf, tf, tree};
@@ -337,7 +338,7 @@ struct Cursor {
     position_in_block: u8,
 
     summary: Summary,
-    block: Option<Block>,
+    block: Block,
     block_upper_bound: f64,
 
     incoming: Incoming,
@@ -413,7 +414,11 @@ impl Cursor {
             document_id: summary.min_document_id,
             position_in_block: 0,
             summary,
-            block: None,
+            block: Block {
+                flag: false,
+                document_ids: Buf::new(),
+                term_frequencies: Buf::new(),
+            },
             block_upper_bound,
             incoming,
         }
@@ -438,9 +443,7 @@ impl Cursor {
         R::Page: Page<Opaque = Opaque>,
     {
         self.seek_block(index, document_id);
-        if document_id <= self.summary.min_document_id {
-            self.document_id = self.summary.min_document_id;
-            self.position_in_block = 0;
+        if document_id <= self.document_id {
             return;
         }
         if document_id == self.summary.max_document_id {
@@ -454,13 +457,16 @@ impl Cursor {
             self.summary.min_document_id,
             self.summary.ptr_block,
         );
-        (self.document_id, self.position_in_block) = 'a: {
-            for i in 0..self.summary.number_of_documents {
-                if block.document_ids[i as usize] >= document_id {
-                    break 'a (block.document_ids[i as usize], i as u8);
-                }
-            }
-            unreachable!()
+        (self.document_id, self.position_in_block) = {
+            let i = if document_id == self.document_id + 1 {
+                self.position_in_block + 1
+            } else {
+                let start = self.position_in_block + 1;
+                let (Ok(delta) | Err(delta)) =
+                    block.document_ids.as_slice()[start as usize..].binary_search(&document_id);
+                start + delta as u8
+            };
+            (block.document_ids.as_slice()[i as usize], i)
         };
     }
     fn seek_block<R: RelationRead>(&mut self, index: &R, document_id: u32)
@@ -478,7 +484,7 @@ impl Cursor {
                 wand_term_frequency: 0,
                 ptr_block: None,
             });
-            self.block = None;
+            self.block.flag = false;
             self.block_upper_bound = {
                 let idf = idf(self.number_of_documents, self.token_number_of_documents);
                 let document_length = self.summary.wand_document_length;
@@ -500,44 +506,45 @@ impl Cursor {
             self.summary.min_document_id,
             self.summary.ptr_block,
         );
-        block.term_frequencies[self.position_in_block as usize]
+        block.term_frequencies.as_slice()[self.position_in_block as usize]
     }
 }
 
 struct Block {
-    document_ids: Vec<u32>,
-    term_frequencies: Vec<u32>,
+    flag: bool,
+    document_ids: Buf,
+    term_frequencies: Buf,
 }
 
 impl Block {
-    fn get<'this, R: RelationRead>(
-        this: &'this mut Option<Self>,
+    fn get<R: RelationRead>(
+        &mut self,
         index: &R,
         min_document_id: u32,
         ptr_block: Option<(u32, u16)>,
-    ) -> &'this Self
+    ) -> &Self
     where
         R::Page: Page<Opaque = Opaque>,
     {
-        this.get_or_insert_with(|| {
+        if !self.flag {
+            self.flag = true;
             let block = ptr_block.expect("cursor has reached its end");
             let block_guard = index.read(block.0);
             let block_bytes = block_guard.get(block.1).expect("data corruption");
             let block_tuple = BlockTuple::deserialize_ref(block_bytes);
-            let document_ids = compression::decompress_document_ids(
+            compression::decompress_document_ids(
                 min_document_id,
                 block_tuple.bitwidth_document_ids(),
                 block_tuple.compressed_document_ids(),
+                &mut self.document_ids,
             );
-            let term_frequencies = compression::decompress_term_frequencies(
+            compression::decompress_term_frequencies(
                 block_tuple.bitwidth_term_frequencies(),
                 block_tuple.compressed_term_frequencies(),
+                &mut self.term_frequencies,
             );
-            Self {
-                document_ids,
-                term_frequencies,
-            }
-        })
+        }
+        self
     }
 }
 
@@ -551,7 +558,7 @@ impl Incoming {
     where
         R::Page: Page<Opaque = Opaque>,
     {
-        let mut buffered = VecDeque::new();
+        let mut buffer = VecDeque::new();
         let incoming = 'incoming: {
             let summary_guard = index.read(ptr_summaries.0);
             for j in ptr_summaries.1..=summary_guard.len() {
@@ -560,7 +567,7 @@ impl Incoming {
                 if summary_tuple.token_id() != token_id {
                     break 'incoming u32::MAX;
                 }
-                buffered.push_back(Summary {
+                buffer.push_back(Summary {
                     min_document_id: summary_tuple.min_document_id(),
                     max_document_id: summary_tuple.max_document_id(),
                     number_of_documents: summary_tuple.number_of_documents(),
@@ -572,7 +579,7 @@ impl Incoming {
             summary_guard.get_opaque().next
         };
         Self {
-            buffer: buffered,
+            buffer,
             next: incoming,
         }
     }

@@ -12,6 +12,7 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::buf::Buf;
 use crate::segment::{Collector0, Wand};
 use crate::tape::TapeWriter;
 use crate::tuples::*;
@@ -76,18 +77,22 @@ where
                     .get(summary_tuple.wptr_block().into_inner().1)
                     .expect("data corruption");
                 let block_tuple = BlockTuple::deserialize_ref(block_bytes);
-                let document_ids = compression::decompress_document_ids(
+                let mut document_ids = Buf::new();
+                compression::decompress_document_ids(
                     summary_tuple.min_document_id(),
                     block_tuple.bitwidth_document_ids(),
                     block_tuple.compressed_document_ids(),
+                    &mut document_ids,
                 );
-                let term_frequencies = compression::decompress_term_frequencies(
+                let mut term_frequencies = Buf::new();
+                compression::decompress_term_frequencies(
                     block_tuple.bitwidth_term_frequencies(),
                     block_tuple.compressed_term_frequencies(),
+                    &mut term_frequencies,
                 );
                 for i in 0..summary_tuple.number_of_documents() {
-                    let document_id = document_ids[i as usize];
-                    let term_frequency = term_frequencies[i as usize];
+                    let document_id = document_ids.as_slice()[i as usize];
+                    let term_frequency = term_frequencies.as_slice()[i as usize];
                     collector.add_element(summary_tuple.token_id(), document_id, term_frequency);
                 }
             }
