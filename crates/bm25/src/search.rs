@@ -238,7 +238,7 @@ where
                 }
                 results.push(result, payload);
             }
-            for mut cursor in chain(tail.into_iter(), lead.into_iter()) {
+            for mut cursor in chain(tail, lead) {
                 cursor.seek(index, 1 + document_id);
                 head.push(Reverse(cursor));
             }

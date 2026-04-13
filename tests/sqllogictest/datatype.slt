@@ -41,15 +41,19 @@ SELECT '{333:1,222:2}'::bm25vector;
 statement error failed to parse number
 SELECT '{4294967296:1}'::bm25vector;
 
+skipif windows
 statement ok
 COPY t TO '/tmp/t_format' WITH (FORMAT text);
 
+skipif windows
 statement ok
 CREATE TABLE t_text (index serial primary key, embedding bm25vector);
 
+skipif windows
 statement ok
 COPY t_text FROM '/tmp/t_format' WITH (FORMAT text);
 
+skipif windows
 query II
 SELECT sum((t.embedding = t_text.embedding)::int), sum((t.embedding <> t_text.embedding)::int)
 FROM t
@@ -58,20 +62,25 @@ WHERE t.index = t_text.index;
 ----
 2048 0
 
+skipif windows
 statement ok
 DROP TABLE t_text;
 
 # binary format
 
+skipif windows
 statement ok
 COPY t TO '/tmp/t_binary' WITH (FORMAT binary);
 
+skipif windows
 statement ok
 CREATE TABLE t_binary (index serial primary key, embedding bm25vector);
 
+skipif windows
 statement ok
 COPY t_binary FROM '/tmp/t_binary' WITH (FORMAT binary);
 
+skipif windows
 query II
 SELECT sum((t.embedding = t_binary.embedding)::int), sum((t.embedding <> t_binary.embedding)::int)
 FROM t
@@ -80,6 +89,7 @@ WHERE t.index = t_binary.index;
 ----
 2048 0
 
+skipif windows
 statement ok
 DROP TABLE t_binary;
 
