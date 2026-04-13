@@ -11,7 +11,12 @@ init = []
 simd_macros = { path = "../simd_macros" }
 
 seq-macro = "0.3.6"
+
+[target.'cfg(not(any(target_arch = "s390x", target_arch = "powerpc64")))'.dependencies]
 zerocopy.workspace = true
+
+[target.'cfg(any(target_arch = "s390x", target_arch = "powerpc64"))'.dependencies]
+zerocopy = { workspace = true, features = ["simd-nightly"] }
 
 [dev-dependencies]
 rand.workspace = true
