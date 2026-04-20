@@ -322,9 +322,9 @@ struct VectorTupleHeader0 {
     deleted: Bool,
     _padding_0: [Padding; 1],
     payload: [u16; 3],
-    length: u32,
     elements_s: u16,
     elements_e: u16,
+    _padding_1: [Padding; 4],
 }
 
 #[repr(C, align(8))]
@@ -337,19 +337,23 @@ struct VectorTupleHeader1 {
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
-struct VectorTupleHeader2 {}
+struct VectorTupleHeader2 {
+    fieldnorm: u8,
+    _padding_0: [Padding; 7],
+}
 
 pub enum VectorTuple {
     _0 {
         deleted: Bool,
         payload: [u16; 3],
-        length: u32,
         elements: Vec<Element>,
     },
     _1 {
         elements: Vec<Element>,
     },
-    _2 {},
+    _2 {
+        fieldnorm: u8,
+    },
 }
 
 impl Tuple for VectorTuple {
@@ -359,7 +363,6 @@ impl Tuple for VectorTuple {
             VectorTuple::_0 {
                 deleted,
                 payload,
-                length,
                 elements,
             } => {
                 buffer.extend((0 as Tag).to_ne_bytes());
@@ -376,10 +379,10 @@ impl Tuple for VectorTuple {
                     VectorTupleHeader0 {
                         deleted: *deleted,
                         payload: *payload,
-                        length: *length,
                         elements_s,
                         elements_e,
                         _padding_0: Default::default(),
+                        _padding_1: Default::default(),
                     }
                     .as_bytes(),
                 );
@@ -404,9 +407,15 @@ impl Tuple for VectorTuple {
                     .as_bytes(),
                 );
             }
-            VectorTuple::_2 {} => {
+            VectorTuple::_2 { fieldnorm } => {
                 buffer.extend((2 as Tag).to_ne_bytes());
-                buffer.extend(VectorTupleHeader2 {}.as_bytes());
+                buffer.extend(
+                    VectorTupleHeader2 {
+                        fieldnorm: *fieldnorm,
+                        _padding_0: Default::default(),
+                    }
+                    .as_bytes(),
+                );
             }
         }
         buffer
@@ -512,9 +521,6 @@ impl<'a> VectorTupleReader0<'a> {
     pub fn payload(self) -> [u16; 3] {
         self.header.payload
     }
-    pub fn length(self) -> u32 {
-        self.header.length
-    }
     pub fn elements(self) -> &'a [Element] {
         self.elements
     }
@@ -535,8 +541,13 @@ impl<'a> VectorTupleReader1<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct VectorTupleReader2<'a> {
-    #[allow(dead_code)]
     header: &'a VectorTupleHeader2,
+}
+
+impl VectorTupleReader2<'_> {
+    pub fn fieldnorm(self) -> u8 {
+        self.header.fieldnorm
+    }
 }
 
 pub enum VectorTupleWriter<'a> {

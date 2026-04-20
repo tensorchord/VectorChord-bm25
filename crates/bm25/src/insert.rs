@@ -13,6 +13,7 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use crate::Opaque;
+use crate::bm25::length_to_fieldnorm;
 use crate::tape::TapeWriter;
 use crate::tuples::{JumpTuple, MetaTuple, VectorTuple, WithReader};
 use crate::vector::Document;
@@ -24,6 +25,7 @@ where
     R::Page: Page<Opaque = Opaque>,
 {
     let document_length = document.length();
+    let fieldnorm = length_to_fieldnorm(document_length);
 
     let meta_guard = index.read(0);
     let meta_bytes = meta_guard.get(1).expect("data corruption");
@@ -52,7 +54,7 @@ where
     };
 
     let mut tape = TapeWriter::from_guard(index, head);
-    tape.push(VectorTuple::_2 {});
+    tape.push(VectorTuple::_2 { fieldnorm });
     let mut remain = document.as_slice();
     loop {
         let freespace = tape.freespace();
@@ -60,7 +62,6 @@ where
             tape.tape_put(VectorTuple::_0 {
                 deleted: Bool::FALSE,
                 payload,
-                length: document_length,
                 elements: remain.to_vec(),
             });
             break;
