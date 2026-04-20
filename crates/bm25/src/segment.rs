@@ -12,45 +12,8 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::WIDTH;
 use crate::vector::{Document, Element};
-use crate::{WIDTH, tf};
-
-pub struct Wand {
-    tf: f64,
-    fieldnorm: u8,
-    term_frequency: u32,
-}
-
-impl Wand {
-    pub fn new() -> Self {
-        Self {
-            tf: 0.0f64,
-            fieldnorm: u8::MAX,
-            term_frequency: 0_u32,
-        }
-    }
-    pub fn push(&mut self, k1: f64, b: f64, avgdl: f64, fieldnorm: u8, term_frequency: u32) {
-        let tf = tf(fieldnorm, term_frequency, k1, b, avgdl);
-        if self.tf < tf {
-            self.tf = tf;
-            self.fieldnorm = fieldnorm;
-            self.term_frequency = term_frequency;
-        }
-    }
-    pub fn extend(&mut self, other: &Self) {
-        if self.tf < other.tf {
-            self.tf = other.tf;
-            self.fieldnorm = other.fieldnorm;
-            self.term_frequency = other.term_frequency;
-        }
-    }
-    pub fn fieldnorm(&self) -> u8 {
-        self.fieldnorm
-    }
-    pub fn term_frequency(&self) -> u32 {
-        self.term_frequency
-    }
-}
 
 pub struct Collector0 {
     documents: Vec<[u16; 3]>,
@@ -126,8 +89,7 @@ impl Collector {
         let Ok(document_id @ ..u32::MAX) = u32::try_from(document_id) else {
             panic!("number of documents exceeds {}", u32::MAX - 1);
         };
-        let document_length = document.length();
-        self.documents.push((document_length, payload));
+        self.documents.push((document.length(), payload));
         for &Element { key, value } in document.iter() {
             self.lists.push((key, document_id, value));
         }

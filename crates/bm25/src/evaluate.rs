@@ -12,12 +12,12 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::bm25::{idf, length_to_fieldnorm, tf};
 use crate::tuples::{JumpTuple, MetaTuple, TokenTuple, WithReader};
 use crate::vector::{Document, Query};
-use crate::{Opaque, idf, length_to_fieldnorm, tf, tree};
+use crate::{Opaque, address_tokens};
 use index::relation::{Page, RelationRead};
 use score::Score;
-use std::convert::identity;
 
 pub fn evaluate<R: RelationRead>(index: &R, document: &Document, query: &Query) -> Score
 where
@@ -55,17 +55,15 @@ where
                 continue;
             }
         };
-        let Some(wptr_token) = tree::read(
+        let Some((token_guard, token_i)) = address_tokens::read(
             index,
-            jump_tuple.root_tokens(),
             jump_tuple.depth_tokens(),
+            jump_tuple.start_tokens(),
             key,
-            identity,
         ) else {
             continue;
         };
-        let token_guard = index.read(wptr_token.0);
-        let token_bytes = token_guard.get(wptr_token.1).expect("data corruption");
+        let token_bytes = token_guard.get(token_i).expect("data corruption");
         let token_tuple = TokenTuple::deserialize_ref(token_bytes);
         let term_frequency = value;
         let idf = idf(number_of_documents, token_tuple.number_of_documents());

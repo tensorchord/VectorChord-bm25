@@ -18,12 +18,23 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 pub fn intern(string: &[u8]) -> [u8; WIDTH] {
     use zerocopy::FromBytes;
-    let hash = blake3::hash(string);
-    let (left, _) = <[u8; WIDTH]>::read_from_prefix(hash.as_bytes()).expect("WIDTH is too large");
-    left
+    if string.len() < WIDTH && !string.contains(&0) {
+        let mut result = [0_u8; WIDTH];
+        result[..string.len()].copy_from_slice(string);
+        result
+    } else {
+        let hash = blake3::hash(string);
+        let Ok((mut result, _)) = <[u8; WIDTH]>::read_from_prefix(hash.as_bytes()) else {
+            unreachable!()
+        };
+        if result[WIDTH - 1] == 0 {
+            result[WIDTH - 1] = 1;
+        }
+        result
+    }
 }
 
-#[repr(C, packed(2))]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
 pub struct Element {
     pub key: [u8; WIDTH],

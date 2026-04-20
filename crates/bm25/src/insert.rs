@@ -14,7 +14,7 @@
 
 use crate::Opaque;
 use crate::tape::TapeWriter;
-use crate::tuples::*;
+use crate::tuples::{JumpTuple, MetaTuple, VectorTuple, WithReader};
 use crate::vector::Document;
 use index::relation::{Page, RelationRead, RelationWrite};
 use index::tuples::Bool;

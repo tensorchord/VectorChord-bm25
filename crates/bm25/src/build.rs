@@ -12,16 +12,13 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::segment::Wand;
+use crate::bm25::{Wand, length_to_fieldnorm};
 use crate::tape::TapeWriter;
-use crate::tuples::{
-    BlockTuple, DocumentTuple, JumpTuple, MetaTuple, Pointer, SummaryTuple, TokenTuple, VectorTuple,
-};
+use crate::tuples::*;
 use crate::types::Bm25IndexOptions;
-use crate::{Opaque, Segment, compression, length_to_fieldnorm, tree};
+use crate::{Opaque, Segment, address_documents, address_tokens, compression};
 use index::relation::{Page, RelationWrite};
 use index::tuples::Bool;
-use std::convert::identity;
 
 pub fn build<R: RelationWrite>(bm25_options: Bm25IndexOptions, index: &R, segment: Segment)
 where
@@ -43,16 +40,12 @@ where
 
     let mut map_documents = Vec::new();
     let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index);
-    for (document_id, &(document_length, payload)) in segment.documents().iter().enumerate() {
-        map_documents.push((
-            document_id as u32,
-            tape_documents.push(DocumentTuple {
-                id: document_id as u32,
-                fieldnorm: length_to_fieldnorm(document_length),
-                payload,
-                deleted: Bool::FALSE,
-            }),
-        ));
+    for &(document_length, payload) in segment.documents().iter() {
+        map_documents.push(tape_documents.push(DocumentTuple {
+            fieldnorm: length_to_fieldnorm(document_length),
+            payload,
+            deleted: Bool::FALSE,
+        }));
     }
 
     let mut map_tokens = Vec::new();
@@ -77,11 +70,11 @@ where
             for &(_, document_id, term_frequency) in block.internal() {
                 let (document_length, _) = segment.documents()[document_id as usize];
                 block_wand.push(
+                    length_to_fieldnorm(document_length),
+                    term_frequency,
                     k1,
                     b,
                     avgdl,
-                    length_to_fieldnorm(document_length),
-                    term_frequency,
                 );
             }
             token_wand.extend(&block_wand);
@@ -112,18 +105,20 @@ where
     let tape_vectors = TapeWriter::<_, VectorTuple>::create(index);
 
     let mut tape_jump = TapeWriter::<_, JumpTuple>::create(index);
-    let (root_documents, depth_documents, free_documents) =
-        tree::write(index, &map_documents, u32::to_ne_bytes);
-    let (root_tokens, depth_tokens, free_tokens) = tree::write(index, &map_tokens, identity);
+    let (width_1_documents, width_0_documents, depth_documents, start_documents, free_documents) =
+        address_documents::write(index, &map_documents);
+    let (depth_tokens, start_tokens, free_tokens) = address_tokens::write(index, &map_tokens);
     let ptr_jump = tape_jump.push(JumpTuple {
         ptr_vectors: { tape_vectors }.first(),
         number_of_documents: segment.documents().len() as u32,
         sum_of_document_lengths,
-        root_documents,
+        width_1_documents,
+        width_0_documents,
         depth_documents,
+        start_documents,
         free_documents,
-        root_tokens,
         depth_tokens,
+        start_tokens,
         free_tokens,
         ptr_documents: { tape_documents }.first(),
         ptr_tokens: { tape_tokens }.first(),

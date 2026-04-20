@@ -12,14 +12,14 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::segment::{Collector0, Wand};
+use crate::bm25::{Wand, length_to_fieldnorm};
+use crate::segment::Collector0;
 use crate::tape::{TapeReader, TapeWriter};
 use crate::tuples::*;
 use crate::vector::Document;
-use crate::{Opaque, WIDTH, compression, length_to_fieldnorm, tree};
+use crate::{Opaque, WIDTH, address_documents, address_tokens, compression};
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
 use index::tuples::Bool;
-use std::convert::identity;
 
 pub fn maintain<R: RelationRead + RelationWrite>(index: &R, _check: impl Fn())
 where
@@ -191,16 +191,12 @@ where
 
     let mut map_documents = Vec::new();
     let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index);
-    for (document_id, &(document_length, payload)) in segment.documents().iter().enumerate() {
-        map_documents.push((
-            document_id as u32,
-            tape_documents.push(DocumentTuple {
-                id: document_id as u32,
-                fieldnorm: length_to_fieldnorm(document_length),
-                payload,
-                deleted: Bool::FALSE,
-            }),
-        ));
+    for &(document_length, payload) in segment.documents().iter() {
+        map_documents.push(tape_documents.push(DocumentTuple {
+            fieldnorm: length_to_fieldnorm(document_length),
+            payload,
+            deleted: Bool::FALSE,
+        }));
     }
 
     let mut map_tokens = Vec::new();
@@ -225,11 +221,11 @@ where
             for &(_, document_id, term_frequency) in block.internal() {
                 let (document_length, _) = segment.documents()[document_id as usize];
                 block_wand.push(
+                    length_to_fieldnorm(document_length),
+                    term_frequency,
                     k1,
                     b,
                     avgdl,
-                    length_to_fieldnorm(document_length),
-                    term_frequency,
                 );
             }
             token_wand.extend(&block_wand);
@@ -271,17 +267,19 @@ where
         (*jump_tuple.ptr_blocks(), u32::MAX),
     ];
 
-    let (root_documents, depth_documents, free_documents) =
-        tree::write(index, &map_documents, u32::to_ne_bytes);
-    let (root_tokens, depth_tokens, free_tokens) = tree::write(index, &map_tokens, identity);
+    let (width_1_documents, width_0_documents, depth_documents, start_documents, free_documents) =
+        address_documents::write(index, &map_documents);
+    let (depth_tokens, start_tokens, free_tokens) = address_tokens::write(index, &map_tokens);
     *jump_tuple.ptr_vectors() = ptr_vectors;
     *jump_tuple.number_of_documents() = segment.documents().len() as u32;
     *jump_tuple.sum_of_document_lengths() = sum_of_document_lengths;
-    *jump_tuple.root_documents() = root_documents;
+    *jump_tuple.width_1_documents() = width_1_documents;
+    *jump_tuple.width_0_documents() = width_0_documents;
     *jump_tuple.depth_documents() = depth_documents;
+    *jump_tuple.start_documents() = start_documents;
     *jump_tuple.free_documents() = free_documents;
-    *jump_tuple.root_tokens() = root_tokens;
     *jump_tuple.depth_tokens() = depth_tokens;
+    *jump_tuple.start_tokens() = start_tokens;
     *jump_tuple.free_tokens() = free_tokens;
     *jump_tuple.ptr_documents() = { tape_documents }.first();
     *jump_tuple.ptr_tokens() = { tape_tokens }.first();

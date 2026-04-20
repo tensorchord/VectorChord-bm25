@@ -12,16 +12,16 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::bm25::{Cache, length_to_fieldnorm};
 use crate::tape::TruncatedTapeReader;
 use crate::tuples::*;
 use crate::vector::{Element, Query};
-use crate::{Opaque, WIDTH, compression, fieldnorm_to_length, idf, length_to_fieldnorm, tree};
+use crate::{Opaque, WIDTH, address_documents, address_tokens, compression};
 use always_equal::AlwaysEqual;
 use index::relation::{Page, RelationRead};
 use score::Score;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::convert::identity;
 use std::iter::chain;
 use std::num::NonZero;
 
@@ -52,17 +52,15 @@ where
 
     let mut tokens = Vec::new();
     for &key in query.iter() {
-        let Some(wptr_token) = tree::read(
+        let Some((token_guard, token_i)) = address_tokens::read(
             index,
-            jump_tuple.root_tokens(),
             jump_tuple.depth_tokens(),
+            jump_tuple.start_tokens(),
             key,
-            identity,
         ) else {
             continue;
         };
-        let token_guard = index.read(wptr_token.0);
-        let token_bytes = token_guard.get(wptr_token.1).expect("data corruption");
+        let token_bytes = token_guard.get(token_i).expect("data corruption");
         let token_tuple = TokenTuple::deserialize_ref(token_bytes);
         tokens.push(Token {
             id: key,
@@ -70,7 +68,7 @@ where
             wand_fieldnorm: token_tuple.wand_fieldnorm(),
             wand_term_frequency: token_tuple.wand_term_frequency(),
             wptr_summaries: token_tuple.wptr_summaries(),
-            bm25: Bm25::new(
+            bm25: Cache::new(
                 number_of_documents,
                 token_tuple.number_of_documents(),
                 k1,
@@ -109,9 +107,9 @@ where
                                 let mut result = 0.0;
                                 for &Element { key, value } in document.iter() {
                                     if let Ok(i) = tokens.binary_search_by_key(&key, |t| t.id) {
+                                        let token = &tokens[i];
                                         let term_frequency = value;
-                                        result +=
-                                            tokens[i].bm25.evaluate(fieldnorm, term_frequency);
+                                        result += token.bm25.evaluate(fieldnorm, term_frequency);
                                     }
                                 }
                                 results.push(result, payload);
@@ -204,16 +202,16 @@ where
                     continue 'main;
                 }
             };
-            let document = tree::read(
+            let (document_guard, document_i) = address_documents::read(
                 index,
-                jump_tuple.root_documents(),
+                jump_tuple.width_1_documents(),
+                jump_tuple.width_0_documents(),
                 jump_tuple.depth_documents(),
+                jump_tuple.start_documents(),
                 document_id,
-                u32::from_ne_bytes,
             )
             .expect("data corruption");
-            let document_guard = index.read(document.0);
-            let document_bytes = document_guard.get(document.1).expect("data corruption");
+            let document_bytes = document_guard.get(document_i).expect("data corruption");
             let document_tuple = DocumentTuple::deserialize_ref(document_bytes);
             let fieldnorm = document_tuple.fieldnorm();
             let payload = document_tuple.payload();
@@ -304,7 +302,7 @@ impl<T> Results<T> {
 }
 
 struct Cursor {
-    bm25: Bm25,
+    bm25: Cache,
     token_upper_bound: f64,
 
     document_id: u32,
@@ -345,7 +343,7 @@ impl Cursor {
         token_wand_fieldnorm: u8,
         token_wand_term_frequency: u32,
         wptr_summaries: (u32, u16),
-        bm25: Bm25,
+        bm25: Cache,
     ) -> Self
     where
         R::Page: Page<Opaque = Opaque>,
@@ -384,7 +382,7 @@ impl Cursor {
             incoming,
         }
     }
-    fn bm25(&self) -> &Bm25 {
+    fn bm25(&self) -> &Cache {
         &self.bm25
     }
     fn token_upper_bound(&self) -> f64 {
@@ -471,34 +469,6 @@ impl Cursor {
     }
 }
 
-struct Bm25 {
-    idf: f64,
-    x1: f64,
-    x2: [f64; 256],
-}
-
-impl Bm25 {
-    fn new(
-        number_of_documents: u32,
-        token_number_of_documents: u32,
-        k1: f64,
-        b: f64,
-        avgdl: f64,
-    ) -> Self {
-        let idf = idf(number_of_documents, token_number_of_documents);
-        let x1 = k1 + 1.0;
-        let x2 = std::array::from_fn(|fieldnorm| {
-            let document_length = fieldnorm_to_length(fieldnorm as u8) as f64;
-            k1 * (1.0 - b + b * document_length / avgdl)
-        });
-        Self { idf, x1, x2 }
-    }
-    fn evaluate(&self, fieldnorm: u8, term_frequency: u32) -> f64 {
-        let term_frequency = term_frequency as f64;
-        self.idf * (term_frequency * self.x1) / (term_frequency + self.x2[fieldnorm as usize])
-    }
-}
-
 fn next_summary<R: RelationRead>(incoming: &mut TruncatedTapeReader<Summary>, index: &R) -> Summary
 where
     R::Page: Page<Opaque = Opaque>,
@@ -541,7 +511,7 @@ struct Token {
     wand_fieldnorm: u8,
     wand_term_frequency: u32,
     wptr_summaries: (u32, u16),
-    bm25: Bm25,
+    bm25: Cache,
 }
 
 struct Summary {

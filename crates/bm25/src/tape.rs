@@ -13,7 +13,7 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use crate::Opaque;
-use crate::tuples::*;
+use crate::tuples::Tuple;
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
 use std::collections::VecDeque;
 use std::marker::PhantomData;

@@ -137,16 +137,19 @@ struct JumpTupleHeader {
     ptr_vectors: u32,
     number_of_documents: u32,
     sum_of_document_lengths: u64,
-    root_documents: u32,
+    width_1_documents: u16,
+    width_0_documents: u16,
     depth_documents: u32,
+    start_documents: u32,
     free_documents: u32,
-    root_tokens: u32,
     depth_tokens: u32,
+    start_tokens: u32,
     free_tokens: u32,
     ptr_documents: u32,
     ptr_tokens: u32,
     ptr_summaries: u32,
     ptr_blocks: u32,
+    _padding_0: [Padding; 4],
 }
 
 #[derive(Debug, Clone)]
@@ -154,11 +157,13 @@ pub struct JumpTuple {
     pub ptr_vectors: u32,
     pub number_of_documents: u32,
     pub sum_of_document_lengths: u64,
-    pub root_documents: u32,
+    pub width_1_documents: u16,
+    pub width_0_documents: u16,
     pub depth_documents: u32,
+    pub start_documents: u32,
     pub free_documents: u32,
-    pub root_tokens: u32,
     pub depth_tokens: u32,
+    pub start_tokens: u32,
     pub free_tokens: u32,
     pub ptr_documents: u32,
     pub ptr_tokens: u32,
@@ -172,16 +177,19 @@ impl Tuple for JumpTuple {
             ptr_vectors: self.ptr_vectors,
             number_of_documents: self.number_of_documents,
             sum_of_document_lengths: self.sum_of_document_lengths,
-            root_documents: self.root_documents,
+            width_1_documents: self.width_1_documents,
+            width_0_documents: self.width_0_documents,
             depth_documents: self.depth_documents,
+            start_documents: self.start_documents,
             free_documents: self.free_documents,
-            root_tokens: self.root_tokens,
             depth_tokens: self.depth_tokens,
+            start_tokens: self.start_tokens,
             free_tokens: self.free_tokens,
             ptr_documents: self.ptr_documents,
             ptr_tokens: self.ptr_tokens,
             ptr_summaries: self.ptr_summaries,
             ptr_blocks: self.ptr_blocks,
+            _padding_0: Default::default(),
         }
         .as_bytes()
         .to_vec()
@@ -223,17 +231,23 @@ impl<'a> JumpTupleReader<'a> {
     pub fn sum_of_document_lengths(self) -> u64 {
         self.header.sum_of_document_lengths
     }
-    pub fn root_documents(self) -> u32 {
-        self.header.root_documents
+    pub fn width_1_documents(self) -> u16 {
+        self.header.width_1_documents
+    }
+    pub fn width_0_documents(self) -> u16 {
+        self.header.width_0_documents
     }
     pub fn depth_documents(self) -> u32 {
         self.header.depth_documents
     }
-    pub fn root_tokens(self) -> u32 {
-        self.header.root_tokens
+    pub fn start_documents(self) -> u32 {
+        self.header.start_documents
     }
     pub fn depth_tokens(self) -> u32 {
         self.header.depth_tokens
+    }
+    pub fn start_tokens(self) -> u32 {
+        self.header.start_tokens
     }
     pub fn ptr_documents(self) -> u32 {
         self.header.ptr_documents
@@ -264,20 +278,26 @@ impl<'a> JumpTupleWriter<'a> {
     pub fn sum_of_document_lengths(&mut self) -> &mut u64 {
         &mut self.header.sum_of_document_lengths
     }
-    pub fn root_documents(&mut self) -> &mut u32 {
-        &mut self.header.root_documents
+    pub fn width_1_documents(&mut self) -> &mut u16 {
+        &mut self.header.width_1_documents
+    }
+    pub fn width_0_documents(&mut self) -> &mut u16 {
+        &mut self.header.width_0_documents
     }
     pub fn depth_documents(&mut self) -> &mut u32 {
         &mut self.header.depth_documents
     }
+    pub fn start_documents(&mut self) -> &mut u32 {
+        &mut self.header.start_documents
+    }
     pub fn free_documents(&mut self) -> &mut u32 {
         &mut self.header.free_documents
     }
-    pub fn root_tokens(&mut self) -> &mut u32 {
-        &mut self.header.root_tokens
-    }
     pub fn depth_tokens(&mut self) -> &mut u32 {
         &mut self.header.depth_tokens
+    }
+    pub fn start_tokens(&mut self) -> &mut u32 {
+        &mut self.header.start_tokens
     }
     pub fn free_tokens(&mut self) -> &mut u32 {
         &mut self.header.free_tokens
@@ -563,20 +583,100 @@ pub struct VectorTupleWriter2<'a> {
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
-struct NodeTupleHeader {
+struct AddressDocumentsTupleHeader {
+    internal_s: u16,
+    internal_e: u16,
+    _padding_0: [Padding; 4],
+}
+
+pub struct AddressDocumentsTuple {
+    pub internal: Vec<u32>,
+}
+
+impl Tuple for AddressDocumentsTuple {
+    fn serialize(&self) -> Vec<u8> {
+        let mut buffer = Vec::<u8>::new();
+        buffer.extend(std::iter::repeat_n(
+            0,
+            size_of::<AddressDocumentsTupleHeader>(),
+        ));
+        // internal
+        let internal_s = buffer.len() as u16;
+        buffer.extend(self.internal.as_bytes());
+        let internal_e = buffer.len() as u16;
+        while buffer.len() % ALIGN != 0 {
+            buffer.push(0);
+        }
+        // header
+        buffer[..size_of::<AddressDocumentsTupleHeader>()].copy_from_slice(
+            AddressDocumentsTupleHeader {
+                internal_s,
+                internal_e,
+                _padding_0: Default::default(),
+            }
+            .as_bytes(),
+        );
+        buffer
+    }
+}
+
+impl AddressDocumentsTuple {
+    pub fn fit(freespace: u16) -> Option<usize> {
+        let mut freespace = freespace as isize;
+        freespace &= !(ALIGN - 1) as isize;
+        freespace -= size_of::<AddressDocumentsTupleHeader>() as isize;
+        freespace &= !(ALIGN - 1) as isize;
+        if freespace >= 0 {
+            Some(freespace as usize / size_of::<u32>())
+        } else {
+            None
+        }
+    }
+}
+
+impl WithReader for AddressDocumentsTuple {
+    type Reader<'a> = AddressDocumentsTupleReader<'a>;
+
+    fn deserialize_ref(source: &[u8]) -> Self::Reader<'_> {
+        let checker = RefChecker::new(source);
+        let header: &AddressDocumentsTupleHeader = checker.prefix(0_u16);
+        let internal = checker.bytes(header.internal_s, header.internal_e);
+        AddressDocumentsTupleReader { header, internal }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AddressDocumentsTupleReader<'a> {
+    #[expect(dead_code)]
+    header: &'a AddressDocumentsTupleHeader,
+    internal: &'a [u32],
+}
+
+impl<'a> AddressDocumentsTupleReader<'a> {
+    pub fn internal(self) -> &'a [u32] {
+        self.internal
+    }
+}
+
+#[repr(C, align(8))]
+#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
+struct AddressTokensTupleHeader {
     edges_s: u16,
     edges_e: u16,
     _padding_0: [Padding; 4],
 }
 
-pub struct NodeTuple<const BITS: usize> {
-    pub edges: Vec<Edge<BITS>>,
+pub struct AddressTokensTuple {
+    pub edges: Vec<Edge>,
 }
 
-impl<const BITS: usize> Tuple for NodeTuple<BITS> {
+impl Tuple for AddressTokensTuple {
     fn serialize(&self) -> Vec<u8> {
         let mut buffer = Vec::<u8>::new();
-        buffer.extend(std::iter::repeat_n(0, size_of::<NodeTupleHeader>()));
+        buffer.extend(std::iter::repeat_n(
+            0,
+            size_of::<AddressTokensTupleHeader>(),
+        ));
         // edges
         let edges_s = buffer.len() as u16;
         buffer.extend(self.edges.as_bytes());
@@ -585,8 +685,8 @@ impl<const BITS: usize> Tuple for NodeTuple<BITS> {
             buffer.push(0);
         }
         // header
-        buffer[..size_of::<NodeTupleHeader>()].copy_from_slice(
-            NodeTupleHeader {
+        buffer[..size_of::<AddressTokensTupleHeader>()].copy_from_slice(
+            AddressTokensTupleHeader {
                 edges_s,
                 edges_e,
                 _padding_0: Default::default(),
@@ -597,40 +697,40 @@ impl<const BITS: usize> Tuple for NodeTuple<BITS> {
     }
 }
 
-impl<const BITS: usize> NodeTuple<BITS> {
+impl AddressTokensTuple {
     pub fn fit(freespace: u16) -> Option<usize> {
         let mut freespace = freespace as isize;
         freespace &= !(ALIGN - 1) as isize;
-        freespace -= size_of::<NodeTupleHeader>() as isize;
+        freespace -= size_of::<AddressTokensTupleHeader>() as isize;
         freespace &= !(ALIGN - 1) as isize;
         if freespace >= 0 {
-            Some(freespace as usize / size_of::<Edge<BITS>>())
+            Some(freespace as usize / size_of::<Edge>())
         } else {
             None
         }
     }
 }
 
-impl<const BITS: usize> WithReader for NodeTuple<BITS> {
-    type Reader<'a> = NodeTupleReader<'a, BITS>;
+impl WithReader for AddressTokensTuple {
+    type Reader<'a> = AddressTokensTupleReader<'a>;
 
     fn deserialize_ref(source: &[u8]) -> Self::Reader<'_> {
         let checker = RefChecker::new(source);
-        let header: &NodeTupleHeader = checker.prefix(0_u16);
-        let edges: &[Edge<BITS>] = checker.bytes(header.edges_s, header.edges_e);
-        NodeTupleReader { header, edges }
+        let header: &AddressTokensTupleHeader = checker.prefix(0_u16);
+        let edges: &[Edge] = checker.bytes(header.edges_s, header.edges_e);
+        AddressTokensTupleReader { header, edges }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct NodeTupleReader<'a, const BITS: usize> {
+pub struct AddressTokensTupleReader<'a> {
     #[expect(dead_code)]
-    header: &'a NodeTupleHeader,
-    edges: &'a [Edge<BITS>],
+    header: &'a AddressTokensTupleHeader,
+    edges: &'a [Edge],
 }
 
-impl<'a, const BITS: usize> NodeTupleReader<'a, BITS> {
-    pub fn edges(self) -> &'a [Edge<BITS>] {
+impl<'a> AddressTokensTupleReader<'a> {
+    pub fn edges(self) -> &'a [Edge] {
         self.edges
     }
 }
@@ -638,15 +738,12 @@ impl<'a, const BITS: usize> NodeTupleReader<'a, BITS> {
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct DocumentTupleHeader {
-    id: u32,
     deleted: Bool,
     fieldnorm: u8,
     payload: [u16; 3],
-    _padding_0: [Padding; 4],
 }
 
 pub struct DocumentTuple {
-    pub id: u32,
     pub deleted: Bool,
     pub fieldnorm: u8,
     pub payload: [u16; 3],
@@ -655,11 +752,9 @@ pub struct DocumentTuple {
 impl Tuple for DocumentTuple {
     fn serialize(&self) -> Vec<u8> {
         DocumentTupleHeader {
-            id: self.id,
             deleted: self.deleted,
             fieldnorm: self.fieldnorm,
             payload: self.payload,
-            _padding_0: Default::default(),
         }
         .as_bytes()
         .to_vec()
@@ -972,18 +1067,18 @@ impl Pointer {
     }
 }
 
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
-pub struct Edge<const BITS: usize> {
-    key: [u8; BITS],
+pub struct Edge {
+    key: [u8; WIDTH],
     value: u32,
 }
 
-impl<const BITS: usize> Edge<BITS> {
-    pub fn new((key, value): ([u8; BITS], u32)) -> Self {
+impl Edge {
+    pub fn new((key, value): ([u8; WIDTH], u32)) -> Self {
         Self { key, value }
     }
-    pub fn into_inner(self) -> ([u8; BITS], u32) {
+    pub fn into_inner(self) -> ([u8; WIDTH], u32) {
         (self.key, self.value)
     }
 }
