@@ -116,7 +116,7 @@ where
     let ptr_vectors = {
         let first = jump_tuple.ptr_vectors();
         assert!(first != u32::MAX);
-        let mut elements = Vec::new();
+        let mut state = None;
         let mut current = first;
         let mut head = loop {
             let read = index.read(current);
@@ -128,16 +128,24 @@ where
                     let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
                     match vector_tuple {
                         VectorTupleReader::_2(_) => {
-                            elements.clear();
+                            state = Some(Vec::new());
                         }
                         VectorTupleReader::_1(vector_tuple) => {
-                            elements.extend(vector_tuple.elements());
+                            if let Some(internal) = state.as_mut() {
+                                internal.extend(vector_tuple.elements());
+                            } else {
+                                panic!("data corruption");
+                            }
                         }
                         VectorTupleReader::_0(vector_tuple) => {
-                            if !bool::from(vector_tuple.deleted()) {
-                                elements.extend(vector_tuple.elements());
-                                let document = Document::new(std::mem::take(&mut elements));
-                                collector.push(&document, vector_tuple.payload());
+                            if let Some(mut internal) = state.take() {
+                                if !bool::from(vector_tuple.deleted()) {
+                                    internal.extend(vector_tuple.elements());
+                                    let document = Document::new(internal);
+                                    collector.push(&document, vector_tuple.payload());
+                                }
+                            } else {
+                                panic!("data corruption");
                             }
                         }
                     }
@@ -152,16 +160,24 @@ where
                     let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
                     match vector_tuple {
                         VectorTupleReader::_2(_) => {
-                            elements.clear();
+                            state = Some(Vec::new());
                         }
                         VectorTupleReader::_1(vector_tuple) => {
-                            elements.extend(vector_tuple.elements());
+                            if let Some(internal) = state.as_mut() {
+                                internal.extend(vector_tuple.elements());
+                            } else {
+                                panic!("data corruption");
+                            }
                         }
                         VectorTupleReader::_0(vector_tuple) => {
-                            if !bool::from(vector_tuple.deleted()) {
-                                elements.extend(vector_tuple.elements());
-                                let document = Document::new(std::mem::take(&mut elements));
-                                collector.push(&document, vector_tuple.payload());
+                            if let Some(mut internal) = state.take() {
+                                if !bool::from(vector_tuple.deleted()) {
+                                    internal.extend(vector_tuple.elements());
+                                    let document = Document::new(internal);
+                                    collector.push(&document, vector_tuple.payload());
+                                }
+                            } else {
+                                panic!("data corruption");
                             }
                         }
                     }

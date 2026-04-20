@@ -12,7 +12,7 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::bm25::{Cache, length_to_fieldnorm};
+use crate::bm25::Cache;
 use crate::tape::TruncatedTapeReader;
 use crate::tuples::*;
 use crate::vector::{Element, Query};
@@ -83,7 +83,7 @@ where
     {
         let first = jump_tuple.ptr_vectors();
         assert!(first != u32::MAX);
-        let mut elements = Vec::new();
+        let mut state = None;
         let mut current = first;
         while current != u32::MAX {
             let vector_guard = index.read(current);
@@ -91,29 +91,41 @@ where
                 let vector_bytes = vector_guard.get(i).expect("data corruption");
                 let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
                 match vector_tuple {
-                    VectorTupleReader::_2(_) => {
-                        elements.clear();
+                    VectorTupleReader::_2(vector_tuple) => {
+                        state = Some((vector_tuple.fieldnorm(), 0.0));
                     }
                     VectorTupleReader::_1(vector_tuple) => {
-                        elements.extend(vector_tuple.elements());
+                        if let Some((fieldnorm, result)) = state.as_mut() {
+                            for &Element { key, value } in vector_tuple.elements() {
+                                if let Ok(i) = tokens.binary_search_by_key(&key, |t| t.id) {
+                                    let token = &tokens[i];
+                                    let term_frequency = value;
+                                    *result += token.bm25.evaluate(*fieldnorm, term_frequency);
+                                }
+                            }
+                        } else {
+                            panic!("data corruption");
+                        }
                     }
                     VectorTupleReader::_0(vector_tuple) => {
-                        if !bool::from(vector_tuple.deleted()) {
-                            let payload = vector_tuple.payload();
-                            if filter(payload) {
-                                elements.extend(vector_tuple.elements());
-                                let document = std::mem::take(&mut elements);
-                                let fieldnorm = length_to_fieldnorm(vector_tuple.length());
-                                let mut result = 0.0;
-                                for &Element { key, value } in document.iter() {
+                        if let Some((fieldnorm, mut result)) = state.take() {
+                            if !bool::from(vector_tuple.deleted()) {
+                                for &Element { key, value } in vector_tuple.elements() {
                                     if let Ok(i) = tokens.binary_search_by_key(&key, |t| t.id) {
                                         let token = &tokens[i];
                                         let term_frequency = value;
                                         result += token.bm25.evaluate(fieldnorm, term_frequency);
                                     }
                                 }
-                                results.push(result, payload);
+                                if results.threshold() < result {
+                                    let payload = vector_tuple.payload();
+                                    if filter(payload) {
+                                        results.push(result, payload);
+                                    }
+                                }
                             }
+                        } else {
+                            panic!("data corruption");
                         }
                     }
                 }
