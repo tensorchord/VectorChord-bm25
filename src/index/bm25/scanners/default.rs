@@ -12,19 +12,20 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::datatype::memory_bm25vector::Bm25VectorOutput;
+use crate::datatype::memory_tsvector::TsVectorOutput;
+use crate::datatype::tsvector::cast_tsvector_to_query;
 use crate::index::bm25::scanners::SearchOptions;
 use crate::index::fetcher::*;
 use crate::index::scanners::SearchBuilder;
 use always_equal::AlwaysEqual;
-use bm25::vector::Bm25VectorOwned;
+use bm25::vector::Query;
 use index::relation::{Page, RelationRead};
 use pgrx::heap_tuple::PgHeapTuple;
 use std::cmp::Reverse;
 use std::num::NonZero;
 
 pub struct DefaultBuilder {
-    orderbys: Vec<Option<Bm25VectorOwned>>,
+    orderbys: Vec<Option<Query>>,
 }
 
 impl SearchBuilder for DefaultBuilder {
@@ -54,13 +55,13 @@ impl SearchBuilder for DefaultBuilder {
                     let tuple = unsafe {
                         PgHeapTuple::<'_, pgrx::AllocatedByRust>::from_datum(datum, false).unwrap()
                     };
-                    let query: Bm25VectorOutput = match tuple.get_by_index(NonZero::new(2).unwrap())
+                    let vector: TsVectorOutput = match tuple.get_by_index(NonZero::new(1).unwrap())
                     {
                         Ok(Some(s)) => s,
-                        Ok(None) => pgrx::error!("Bad input: empty vector at bm25query"),
+                        Ok(None) => pgrx::error!("bm25query contains a null vector"),
                         Err(_) => unreachable!(),
                     };
-                    Some(query.as_borrowed().own())
+                    Some(cast_tsvector_to_query(vector.as_borrowed()))
                 };
                 self.orderbys.push(document);
             }
@@ -73,7 +74,7 @@ impl SearchBuilder for DefaultBuilder {
         index: R,
         options: SearchOptions,
         mut fetcher: impl Fetcher + 'b,
-    ) -> Box<dyn Iterator<Item = (f64, [u16; 3], bool)> + 'b>
+    ) -> Box<dyn Iterator<Item = (f64, [u16; 3])> + 'b>
     where
         R: RelationRead,
         R::Page: Page<Opaque = bm25::Opaque>,
@@ -87,15 +88,15 @@ impl SearchBuilder for DefaultBuilder {
             }
         }
         let Some(vector) = vector else {
-            return Box::new(std::iter::empty()) as Box<dyn Iterator<Item = (f64, [u16; 3], bool)>>;
+            return Box::new(std::iter::empty()) as Box<dyn Iterator<Item = (f64, [u16; 3])>>;
         };
         let Some(limit) = NonZero::new(options.limit as usize) else {
             pgrx::error!("number of needed rows is set to 0");
         };
         let result = if !options.prefilter {
-            bm25::search(&index, limit, vector.as_borrowed(), |_| true)
+            bm25::search(&index, limit, &vector, |_| true)
         } else {
-            bm25::search(&index, limit, vector.as_borrowed(), |pointer| {
+            bm25::search(&index, limit, &vector, |pointer| {
                 let Some(mut tuple) = fetcher.fetch(pointer) else {
                     return false;
                 };
@@ -107,7 +108,7 @@ impl SearchBuilder for DefaultBuilder {
         };
         let iter = result
             .into_iter()
-            .map(move |(Reverse(score), AlwaysEqual(pointer))| (score.to_f64(), pointer, false));
+            .map(move |(Reverse(score), AlwaysEqual(pointer))| (score.to_f64(), pointer));
         Box::new(iter)
     }
 }

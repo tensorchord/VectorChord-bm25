@@ -10,6 +10,7 @@ index = { path = "../index" }
 score = { path = "../score" }
 simd = { path = "../simd" }
 
+blake3 = "1.8.4"
 serde.workspace = true
 validator.workspace = true
 zerocopy.workspace = true

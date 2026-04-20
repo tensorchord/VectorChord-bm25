@@ -68,7 +68,7 @@ fn test(mut clients: Vec<postgres::Client>) {
             r#"
         CREATE TABLE documents (
             id SERIAL PRIMARY KEY,
-            embedding bm25vector
+            embedding tsvector
         ) WITH (autovacuum_enabled = off);
         "#,
             &[],
@@ -77,11 +77,11 @@ fn test(mut clients: Vec<postgres::Client>) {
 
     // Insert initial documents
     for _ in 0..INIT_DOCUMENTS {
-        let bm25vector = random_bm25vector(&mut rng);
+        let tsvector = random_tsvector(&mut rng);
         clients[0]
             .execute(
-                r#"INSERT INTO documents (embedding) VALUES ($1::text::bm25vector);"#,
-                &[&bm25vector],
+                r#"INSERT INTO documents (embedding) VALUES ($1::text::tsvector);"#,
+                &[&tsvector],
             )
             .unwrap();
     }
@@ -110,7 +110,7 @@ fn test(mut clients: Vec<postgres::Client>) {
             println!("operation = {operation:?}");
             match operation {
                 Operation::Insert => fuzz_insert(&mut clients[0], &mut rng),
-                Operation::Select => fuzz_select(&mut clients[0], &mut rng),
+                Operation::Select => fuzz_select(&mut clients[0], &mut rng, true, false),
                 Operation::Delete => fuzz_delete(&mut clients[0], &mut rng),
                 Operation::Vacuum => fuzz_vacuum(&mut clients[0], &mut rng),
             }
@@ -128,8 +128,14 @@ fn test(mut clients: Vec<postgres::Client>) {
                         match operation {
                             Operation::Insert => fuzz_insert(&mut client, &mut rng),
                             Operation::Select => {
-                                let _guard = LOCK.read().unwrap();
-                                fuzz_select(&mut client, &mut rng)
+                                use std::sync::TryLockError;
+                                let guard = match LOCK.try_read() {
+                                    Ok(r) => Ok(Some(r)),
+                                    Err(TryLockError::Poisoned(e)) => Err(e),
+                                    Err(TryLockError::WouldBlock) => Ok(None),
+                                }
+                                .unwrap();
+                                fuzz_select(&mut client, &mut rng, guard.is_some(), false)
                             }
                             Operation::Delete => fuzz_delete(&mut client, &mut rng),
                             Operation::Vacuum => {
@@ -150,10 +156,16 @@ fn test(mut clients: Vec<postgres::Client>) {
             .collect();
     }
 
+    // final check
+    clients[0]
+        .execute(r#"VACUUM (ANALYZE, INDEX_CLEANUP ON) documents;"#, &[])
+        .unwrap();
+    fuzz_select(&mut clients[0], &mut rng, true, true);
+
     clients[0].execute(r#"DROP TABLE documents;"#, &[]).unwrap();
 }
 
-fn random_bm25vector(rng: &mut impl RngExt) -> String {
+fn random_tsvector(rng: &mut impl RngExt) -> String {
     pub fn from_ids(ids: impl Iterator<Item = u32>) -> String {
         use std::fmt::Write;
         let mut map: BTreeMap<u32, u32> = BTreeMap::new();
@@ -169,18 +181,23 @@ fn random_bm25vector(rng: &mut impl RngExt) -> String {
             doc_len = doc_len.checked_add(value).expect("overflow");
         }
         let mut buffer = String::new();
-        buffer.push('{');
         let mut need_splitter = false;
         for (&index, &value) in indexes.iter().zip(values.iter()) {
+            let mut positions = String::new();
+            for i in 1..=value {
+                if i != 1 {
+                    positions.push(',');
+                }
+                positions.push_str(&format!("{i}"));
+            }
             match need_splitter {
                 false => {
-                    write!(buffer, "{index}:{value}").unwrap();
+                    write!(buffer, "{index}:{positions}").unwrap();
                     need_splitter = true;
                 }
-                true => write!(buffer, ", {index}:{value}").unwrap(),
+                true => write!(buffer, " {index}:{positions}").unwrap(),
             }
         }
-        buffer.push('}');
         buffer
     }
     let ids = (0..DOCUMENT_LEN).map(|_| rng.random_range(0..DOCUMENT_MAX_TOKEN));
@@ -188,16 +205,16 @@ fn random_bm25vector(rng: &mut impl RngExt) -> String {
 }
 
 fn fuzz_insert(client: &mut postgres::Client, rng: &mut impl RngExt) {
-    let bm25vector = random_bm25vector(rng);
+    let tsvector = random_tsvector(rng);
     client
         .execute(
-            r#"INSERT INTO documents (embedding) VALUES ($1::text::bm25vector);"#,
-            &[&bm25vector],
+            r#"INSERT INTO documents (embedding) VALUES ($1::text::tsvector);"#,
+            &[&tsvector],
         )
         .unwrap();
 }
 
-fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
+fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt, check: bool, reindex: bool) {
     let mut client = client
         .build_transaction()
         .isolation_level(postgres::IsolationLevel::RepeatableRead)
@@ -205,7 +222,7 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
         .start()
         .unwrap();
 
-    let query_vector = random_bm25vector(rng);
+    let query_vector = random_tsvector(rng);
 
     client
         .execute("SET LOCAL enable_seqscan = off", &[])
@@ -223,7 +240,7 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
     let restuple = client
         .query(
             r#"
-            SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', $1::text::bm25vector) AS rank
+            SELECT id, embedding <&> to_bm25query($1::text::tsvector, 'documents_embedding_bm25') AS rank
             FROM documents
             ORDER BY rank
             LIMIT 100"#,
@@ -237,6 +254,12 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
         index_result_ranks.push(row.get::<_, f64>(1));
     }
 
+    if reindex {
+        client
+            .execute("REINDEX INDEX documents_embedding_bm25", &[])
+            .unwrap();
+    }
+
     client
         .execute("SET LOCAL enable_seqscan = on", &[])
         .unwrap();
@@ -247,7 +270,7 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
     let restuple = client
         .query(
             r#"
-            SELECT id, embedding <&> to_bm25query('documents_embedding_bm25', $1::text::bm25vector) AS rank
+            SELECT id, embedding <&> to_bm25query($1::text::tsvector, 'documents_embedding_bm25') AS rank
             FROM documents
             ORDER BY rank
             LIMIT 100"#,
@@ -261,7 +284,7 @@ fn fuzz_select(client: &mut postgres::Client, rng: &mut impl RngExt) {
         seq_result_ranks.push(row.get::<_, f64>(1));
     }
 
-    if distance(&index_results, &seq_results) > 10 {
+    if check && distance(&index_results, &seq_results) > 10 {
         use std::io::Write;
         let mut stdout = std::io::stdout().lock();
         writeln!(stdout, "Query = {query_vector}").unwrap();
@@ -287,7 +310,9 @@ fn fuzz_delete(client: &mut postgres::Client, rng: &mut impl RngExt) {
 }
 
 fn fuzz_vacuum(client: &mut postgres::Client, _rng: &mut impl RngExt) {
-    client.execute(r#"VACUUM FULL documents"#, &[]).unwrap();
+    client
+        .execute(r#"VACUUM (ANALYZE, INDEX_CLEANUP ON) documents;"#, &[])
+        .unwrap();
 }
 
 fn distance<T: Eq>(a: &[T], b: &[T]) -> usize {

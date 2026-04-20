@@ -15,7 +15,8 @@
 mod am_build;
 mod am_vacuumcleanup;
 
-use crate::datatype::memory_bm25vector::Bm25VectorInput;
+use crate::datatype::memory_tsvector::TsVectorInput;
+use crate::datatype::tsvector::cast_tsvector_to_document;
 use crate::index::bm25::scanners::{DefaultBuilder, SearchOptions};
 use crate::index::fetcher::*;
 use crate::index::gucs;
@@ -255,11 +256,11 @@ pub unsafe extern "C-unwind" fn aminsert(
         if datum.is_null() {
             break 'block None;
         }
-        let vector = unsafe { Bm25VectorInput::from_datum(datum, false).unwrap() };
-        Some(vector.as_borrowed().own())
+        let vector = unsafe { TsVectorInput::from_datum(datum, false).unwrap() };
+        Some(cast_tsvector_to_document(vector.as_borrowed()))
     };
     if let Some(document) = document {
-        bm25::insert(&index, document.as_borrowed(), ctid_to_key(ctid));
+        bm25::insert(&index, &document, ctid_to_key(ctid));
     }
     false
 }
@@ -395,10 +396,10 @@ pub unsafe extern "C-unwind" fn amgettuple(
         pgrx::error!("scanning with a non-MVCC-compliant snapshot is not supported");
     }
     let scanner = unsafe { (*scan).opaque.cast::<Scanner>().as_mut().unwrap_unchecked() };
-    if let Some((_, key, recheck)) = scanner.scanning.deref_mut().next() {
+    if let Some((_, key)) = scanner.scanning.deref_mut().next() {
         unsafe {
             (*scan).xs_heaptid = key_to_ctid(key);
-            (*scan).xs_recheck = recheck;
+            (*scan).xs_recheck = false;
             (*scan).xs_recheckorderby = false;
         }
         true
@@ -413,7 +414,7 @@ pub unsafe extern "C-unwind" fn amendscan(scan: pgrx::pg_sys::IndexScanDesc) {
     scanner.scanning = LazyCell::new(Box::new(|| Box::new(std::iter::empty())));
 }
 
-type Iter = Box<dyn Iterator<Item = (f64, [u16; 3], bool)>>;
+type Iter = Box<dyn Iterator<Item = (f64, [u16; 3])>>;
 
 pub struct Scanner {
     pub hack: Option<NonNull<pgrx::pg_sys::IndexScanState>>,
