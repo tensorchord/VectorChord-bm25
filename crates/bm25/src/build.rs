@@ -18,7 +18,7 @@ use crate::tuples::{
     BlockTuple, DocumentTuple, JumpTuple, MetaTuple, Pointer, SummaryTuple, TokenTuple, VectorTuple,
 };
 use crate::types::Bm25IndexOptions;
-use crate::{Opaque, Segment, compression, tree};
+use crate::{Opaque, Segment, compression, length_to_fieldnorm, tree};
 use index::relation::{Page, RelationWrite};
 use index::tuples::Bool;
 use std::convert::identity;
@@ -48,7 +48,7 @@ where
             document_id as u32,
             tape_documents.push(DocumentTuple {
                 id: document_id as u32,
-                length: document_length,
+                fieldnorm: length_to_fieldnorm(document_length),
                 payload,
                 deleted: Bool::FALSE,
             }),
@@ -76,14 +76,20 @@ where
             let mut block_wand = Wand::new();
             for &(_, document_id, term_frequency) in block.internal() {
                 let (document_length, _) = segment.documents()[document_id as usize];
-                block_wand.push(k1, b, avgdl, document_length, term_frequency);
+                block_wand.push(
+                    k1,
+                    b,
+                    avgdl,
+                    length_to_fieldnorm(document_length),
+                    term_frequency,
+                );
             }
             token_wand.extend(&block_wand);
             let wptr_summary = tape_summaries.push(SummaryTuple {
                 min_document_id: block.min_document_id(),
                 max_document_id: block.max_document_id(),
                 number_of_documents: block.number_of_documents(),
-                wand_document_length: block_wand.document_length(),
+                wand_fieldnorm: block_wand.fieldnorm(),
                 wand_term_frequency: block_wand.term_frequency(),
                 wptr_block: Pointer::new(wptr_block),
             });
@@ -96,7 +102,7 @@ where
             tape_tokens.push(TokenTuple {
                 id: token.id(),
                 number_of_documents: token.number_of_documents(),
-                wand_document_length: token_wand.document_length(),
+                wand_fieldnorm: token_wand.fieldnorm(),
                 wand_term_frequency: token_wand.term_frequency(),
                 wptr_summaries,
             }),

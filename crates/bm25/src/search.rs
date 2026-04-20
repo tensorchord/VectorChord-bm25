@@ -15,7 +15,7 @@
 use crate::tape::TruncatedTapeReader;
 use crate::tuples::*;
 use crate::vector::{Element, Query};
-use crate::{Opaque, WIDTH, compression, idf, tf, tree};
+use crate::{Opaque, WIDTH, compression, fieldnorm_to_length, idf, length_to_fieldnorm, tree};
 use always_equal::AlwaysEqual;
 use index::relation::{Page, RelationRead};
 use score::Score;
@@ -67,10 +67,16 @@ where
         tokens.push(Token {
             id: key,
             number_of_documents: token_tuple.number_of_documents(),
-            wand_document_length: token_tuple.wand_document_length(),
+            wand_fieldnorm: token_tuple.wand_fieldnorm(),
             wand_term_frequency: token_tuple.wand_term_frequency(),
             wptr_summaries: token_tuple.wptr_summaries(),
-            idf: idf(number_of_documents, token_tuple.number_of_documents()),
+            bm25: Bm25::new(
+                number_of_documents,
+                token_tuple.number_of_documents(),
+                k1,
+                b,
+                avgdl,
+            ),
         });
     }
 
@@ -99,13 +105,13 @@ where
                             if filter(payload) {
                                 elements.extend(vector_tuple.elements());
                                 let document = std::mem::take(&mut elements);
-                                let document_length = vector_tuple.length();
+                                let fieldnorm = length_to_fieldnorm(vector_tuple.length());
                                 let mut result = 0.0;
                                 for &Element { key, value } in document.iter() {
                                     if let Ok(i) = tokens.binary_search_by_key(&key, |t| t.id) {
                                         let term_frequency = value;
-                                        let tf = tf(document_length, term_frequency, k1, b, avgdl);
-                                        result += tokens[i].idf * tf;
+                                        result +=
+                                            tokens[i].bm25.evaluate(fieldnorm, term_frequency);
                                     }
                                 }
                                 results.push(result, payload);
@@ -123,13 +129,10 @@ where
         cursors.push(Box::new(Cursor::new(
             index,
             token.number_of_documents,
-            token.wand_document_length,
+            token.wand_fieldnorm,
             token.wand_term_frequency,
             token.wptr_summaries,
-            token.idf,
-            k1,
-            b,
-            avgdl,
+            token.bm25,
         )));
     }
 
@@ -163,7 +166,7 @@ where
         }
         {
             let mut failures = tail.extract_if(.., |cursor| {
-                cursor.seek_block(index, document_id, k1, b, avgdl);
+                cursor.seek_block(index, document_id);
                 document_id < cursor.document_id()
             });
             if let Some(failure) = failures.next() {
@@ -190,7 +193,7 @@ where
         if results.threshold() < sum_of_block_upper_bounds {
             {
                 let mut failures = tail.extract_if(.., |cursor| {
-                    cursor.seek(index, document_id, k1, b, avgdl);
+                    cursor.seek(index, document_id);
                     document_id < cursor.document_id()
                 });
                 if let Some(failure) = failures.next() {
@@ -212,18 +215,18 @@ where
             let document_guard = index.read(document.0);
             let document_bytes = document_guard.get(document.1).expect("data corruption");
             let document_tuple = DocumentTuple::deserialize_ref(document_bytes);
-            let document_length = document_tuple.length();
+            let fieldnorm = document_tuple.fieldnorm();
             let payload = document_tuple.payload();
             if filter(payload) {
                 let mut result = 0.0;
                 for cursor in chain(tail.iter_mut(), lead.iter_mut()) {
-                    let tf = tf(document_length, cursor.get(index), k1, b, avgdl);
-                    result += cursor.idf() * tf;
+                    let term_frequency = cursor.get(index);
+                    result += cursor.bm25().evaluate(fieldnorm, term_frequency);
                 }
                 results.push(result, payload);
             }
             for mut cursor in chain(tail, lead) {
-                cursor.seek(index, 1 + document_id, k1, b, avgdl);
+                cursor.seek(index, 1 + document_id);
                 head.push(cursor);
             }
             tail = Vec::new();
@@ -258,7 +261,7 @@ where
                 }
                 array[argmax.0].remove(argmax.1)
             };
-            cursor.seek(index, seek_document_id, k1, b, avgdl);
+            cursor.seek(index, seek_document_id);
             head.push(cursor);
             for cursor in lead.into_iter() {
                 head.push(cursor);
@@ -301,7 +304,7 @@ impl<T> Results<T> {
 }
 
 struct Cursor {
-    idf: f64,
+    bm25: Bm25,
     token_upper_bound: f64,
 
     document_id: u32,
@@ -339,23 +342,15 @@ impl Cursor {
     fn new<R: RelationRead>(
         index: &R,
         token_number_of_documents: u32,
-        token_wand_document_length: u32,
+        token_wand_fieldnorm: u8,
         token_wand_term_frequency: u32,
         wptr_summaries: (u32, u16),
-        idf: f64,
-        k1: f64,
-        b: f64,
-        avgdl: f64,
+        bm25: Bm25,
     ) -> Self
     where
         R::Page: Page<Opaque = Opaque>,
     {
-        let token_upper_bound = {
-            let document_length = token_wand_document_length;
-            let term_frequency = token_wand_term_frequency;
-            let tf = tf(document_length, term_frequency, k1, b, avgdl);
-            idf * tf
-        };
+        let token_upper_bound = bm25.evaluate(token_wand_fieldnorm, token_wand_term_frequency);
         let mut incoming = TruncatedTapeReader::new(
             index,
             wptr_summaries,
@@ -365,22 +360,17 @@ impl Cursor {
                     min_document_id: summary_tuple.min_document_id(),
                     max_document_id: summary_tuple.max_document_id(),
                     number_of_documents: summary_tuple.number_of_documents(),
+                    wand_fieldnorm: summary_tuple.wand_fieldnorm(),
                     wand_term_frequency: summary_tuple.wand_term_frequency(),
-                    wand_document_length: summary_tuple.wand_document_length(),
                     wptr_block: summary_tuple.wptr_block().into_inner(),
                 }
             },
             token_number_of_documents.div_ceil(128),
         );
         let summary = next_summary(&mut incoming, index);
-        let block_upper_bound = {
-            let document_length = summary.wand_document_length;
-            let term_frequency = summary.wand_term_frequency;
-            let tf = tf(document_length, term_frequency, k1, b, avgdl);
-            idf * tf
-        };
+        let block_upper_bound = bm25.evaluate(summary.wand_fieldnorm, summary.wand_term_frequency);
         Cursor {
-            idf,
+            bm25,
             token_upper_bound,
             document_id: summary.min_document_id,
             position_in_block: 0,
@@ -394,8 +384,8 @@ impl Cursor {
             incoming,
         }
     }
-    fn idf(&self) -> f64 {
-        self.idf
+    fn bm25(&self) -> &Bm25 {
+        &self.bm25
     }
     fn token_upper_bound(&self) -> f64 {
         self.token_upper_bound
@@ -409,14 +399,8 @@ impl Cursor {
     fn block_upper_bound(&self) -> f64 {
         self.block_upper_bound
     }
-    fn seek_block<R: RelationRead>(
-        &mut self,
-        index: &R,
-        document_id: u32,
-        k1: f64,
-        b: f64,
-        avgdl: f64,
-    ) where
+    fn seek_block<R: RelationRead>(&mut self, index: &R, document_id: u32)
+    where
         R::Page: Page<Opaque = Opaque>,
     {
         assert!(document_id < u32::MAX);
@@ -429,19 +413,17 @@ impl Cursor {
         }
         self.document_id = self.summary.min_document_id;
         self.position_in_block = 0;
-        self.block_upper_bound = {
-            let document_length = self.summary.wand_document_length;
-            let term_frequency = self.summary.wand_term_frequency;
-            let tf = tf(document_length, term_frequency, k1, b, avgdl);
-            self.idf * tf
-        };
+        self.block_upper_bound = self.bm25().evaluate(
+            self.summary.wand_fieldnorm,
+            self.summary.wand_term_frequency,
+        );
         self.filled = false;
     }
-    fn seek<R: RelationRead>(&mut self, index: &R, document_id: u32, k1: f64, b: f64, avgdl: f64)
+    fn seek<R: RelationRead>(&mut self, index: &R, document_id: u32)
     where
         R::Page: Page<Opaque = Opaque>,
     {
-        self.seek_block(index, document_id, k1, b, avgdl);
+        self.seek_block(index, document_id);
         if document_id <= self.document_id {
             return;
         }
@@ -489,6 +471,34 @@ impl Cursor {
     }
 }
 
+struct Bm25 {
+    idf: f64,
+    x1: f64,
+    x2: [f64; 256],
+}
+
+impl Bm25 {
+    fn new(
+        number_of_documents: u32,
+        token_number_of_documents: u32,
+        k1: f64,
+        b: f64,
+        avgdl: f64,
+    ) -> Self {
+        let idf = idf(number_of_documents, token_number_of_documents);
+        let x1 = k1 + 1.0;
+        let x2 = std::array::from_fn(|fieldnorm| {
+            let document_length = fieldnorm_to_length(fieldnorm as u8) as f64;
+            k1 * (1.0 - b + b * document_length / avgdl)
+        });
+        Self { idf, x1, x2 }
+    }
+    fn evaluate(&self, fieldnorm: u8, term_frequency: u32) -> f64 {
+        let term_frequency = term_frequency as f64;
+        self.idf * (term_frequency * self.x1) / (term_frequency + self.x2[fieldnorm as usize])
+    }
+}
+
 fn next_summary<R: RelationRead>(incoming: &mut TruncatedTapeReader<Summary>, index: &R) -> Summary
 where
     R::Page: Page<Opaque = Opaque>,
@@ -497,7 +507,7 @@ where
         min_document_id: u32::MAX,
         max_document_id: u32::MAX,
         number_of_documents: 1,
-        wand_document_length: u32::MAX,
+        wand_fieldnorm: u8::MAX,
         wand_term_frequency: 0_u32,
         wptr_block: (u32::MAX, 0),
     })
@@ -528,17 +538,17 @@ fn fill_block<R: RelationRead>(
 struct Token {
     id: [u8; WIDTH],
     number_of_documents: u32,
-    wand_document_length: u32,
+    wand_fieldnorm: u8,
     wand_term_frequency: u32,
     wptr_summaries: (u32, u16),
-    idf: f64,
+    bm25: Bm25,
 }
 
 struct Summary {
     min_document_id: u32,
     max_document_id: u32,
     number_of_documents: u8,
-    wand_document_length: u32,
+    wand_fieldnorm: u8,
     wand_term_frequency: u32,
     wptr_block: (u32, u16),
 }

@@ -640,15 +640,15 @@ impl<'a, const BITS: usize> NodeTupleReader<'a, BITS> {
 struct DocumentTupleHeader {
     id: u32,
     deleted: Bool,
-    _padding_0: [Padding; 1],
+    fieldnorm: u8,
     payload: [u16; 3],
-    length: u32,
+    _padding_0: [Padding; 4],
 }
 
 pub struct DocumentTuple {
     pub id: u32,
     pub deleted: Bool,
-    pub length: u32,
+    pub fieldnorm: u8,
     pub payload: [u16; 3],
 }
 
@@ -657,7 +657,7 @@ impl Tuple for DocumentTuple {
         DocumentTupleHeader {
             id: self.id,
             deleted: self.deleted,
-            length: self.length,
+            fieldnorm: self.fieldnorm,
             payload: self.payload,
             _padding_0: Default::default(),
         }
@@ -692,8 +692,8 @@ pub struct DocumentTupleReader<'a> {
 }
 
 impl<'a> DocumentTupleReader<'a> {
-    pub fn length(self) -> u32 {
-        self.header.length
+    pub fn fieldnorm(self) -> u8 {
+        self.header.fieldnorm
     }
     pub fn payload(self) -> [u16; 3] {
         self.header.payload
@@ -721,17 +721,17 @@ impl<'a> DocumentTupleWriter<'a> {
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct TokenTupleHeader {
     id: [u8; WIDTH],
-    _padding_0: [Padding; (32 + 6 - WIDTH) % 8],
+    _padding_0: [Padding; (32 + 1 - WIDTH) % 8],
+    wand_fieldnorm: u8,
     wptr_summaries: Pointer,
     number_of_documents: u32,
-    wand_document_length: u32,
     wand_term_frequency: u32,
 }
 
 pub struct TokenTuple {
     pub id: [u8; WIDTH],
     pub number_of_documents: u32,
-    pub wand_document_length: u32,
+    pub wand_fieldnorm: u8,
     pub wand_term_frequency: u32,
     pub wptr_summaries: (u32, u16),
 }
@@ -741,7 +741,7 @@ impl Tuple for TokenTuple {
         TokenTupleHeader {
             id: self.id,
             number_of_documents: self.number_of_documents,
-            wand_document_length: self.wand_document_length,
+            wand_fieldnorm: self.wand_fieldnorm,
             wand_term_frequency: self.wand_term_frequency,
             wptr_summaries: Pointer::new(self.wptr_summaries),
             _padding_0: Default::default(),
@@ -773,8 +773,8 @@ impl<'a> TokenTupleReader<'a> {
     pub fn number_of_documents(self) -> u32 {
         self.header.number_of_documents
     }
-    pub fn wand_document_length(self) -> u32 {
-        self.header.wand_document_length
+    pub fn wand_fieldnorm(self) -> u8 {
+        self.header.wand_fieldnorm
     }
     pub fn wand_term_frequency(self) -> u32 {
         self.header.wand_term_frequency
@@ -789,18 +789,18 @@ impl<'a> TokenTupleReader<'a> {
 struct SummaryTupleHeader {
     min_document_id: u32,
     max_document_id: u32,
-    wand_document_length: u32,
-    wand_term_frequency: u32,
     wptr_block: Pointer,
     number_of_documents: u8,
-    _padding_0: [Padding; 1],
+    wand_fieldnorm: u8,
+    wand_term_frequency: u32,
+    _padding_0: [Padding; 4],
 }
 
 pub struct SummaryTuple {
     pub min_document_id: u32,
     pub max_document_id: u32,
     pub number_of_documents: u8,
-    pub wand_document_length: u32,
+    pub wand_fieldnorm: u8,
     pub wand_term_frequency: u32,
     pub wptr_block: Pointer,
 }
@@ -810,7 +810,7 @@ impl Tuple for SummaryTuple {
         SummaryTupleHeader {
             min_document_id: self.min_document_id,
             max_document_id: self.max_document_id,
-            wand_document_length: self.wand_document_length,
+            wand_fieldnorm: self.wand_fieldnorm,
             wand_term_frequency: self.wand_term_frequency,
             wptr_block: self.wptr_block,
             number_of_documents: self.number_of_documents,
@@ -846,8 +846,8 @@ impl<'a> SummaryTupleReader<'a> {
     pub fn number_of_documents(self) -> u8 {
         self.header.number_of_documents
     }
-    pub fn wand_document_length(self) -> u32 {
-        self.header.wand_document_length
+    pub fn wand_fieldnorm(self) -> u8 {
+        self.header.wand_fieldnorm
     }
     pub fn wand_term_frequency(self) -> u32 {
         self.header.wand_term_frequency

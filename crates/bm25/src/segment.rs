@@ -17,7 +17,7 @@ use crate::{WIDTH, tf};
 
 pub struct Wand {
     tf: f64,
-    document_length: u32,
+    fieldnorm: u8,
     term_frequency: u32,
 }
 
@@ -25,27 +25,27 @@ impl Wand {
     pub fn new() -> Self {
         Self {
             tf: 0.0f64,
-            document_length: u32::MAX,
+            fieldnorm: u8::MAX,
             term_frequency: 0_u32,
         }
     }
-    pub fn push(&mut self, k1: f64, b: f64, avgdl: f64, document_length: u32, term_frequency: u32) {
-        let tf = tf(document_length, term_frequency, k1, b, avgdl);
+    pub fn push(&mut self, k1: f64, b: f64, avgdl: f64, fieldnorm: u8, term_frequency: u32) {
+        let tf = tf(fieldnorm, term_frequency, k1, b, avgdl);
         if self.tf < tf {
             self.tf = tf;
-            self.document_length = document_length;
+            self.fieldnorm = fieldnorm;
             self.term_frequency = term_frequency;
         }
     }
     pub fn extend(&mut self, other: &Self) {
         if self.tf < other.tf {
             self.tf = other.tf;
-            self.document_length = other.document_length;
+            self.fieldnorm = other.fieldnorm;
             self.term_frequency = other.term_frequency;
         }
     }
-    pub fn document_length(&self) -> u32 {
-        self.document_length
+    pub fn fieldnorm(&self) -> u8 {
+        self.fieldnorm
     }
     pub fn term_frequency(&self) -> u32 {
         self.term_frequency
@@ -53,7 +53,7 @@ impl Wand {
 }
 
 pub struct Collector0 {
-    documents: Vec<(u32, [u16; 3])>,
+    documents: Vec<[u16; 3]>,
     relabel: Vec<Option<u32>>,
 }
 
@@ -64,7 +64,7 @@ impl Collector0 {
             relabel: Vec::new(),
         }
     }
-    pub fn add_document(&mut self, data: Option<(u32, [u16; 3])>) {
+    pub fn add_document(&mut self, data: Option<[u16; 3]>) {
         if let Some(data) = data {
             let id = self.documents.len() as u32;
             self.documents.push(data);
@@ -75,7 +75,11 @@ impl Collector0 {
     }
     pub fn finish(self) -> Collector1 {
         Collector1 {
-            documents: self.documents,
+            documents: self
+                .documents
+                .into_iter()
+                .map(|payload| (0, payload))
+                .collect(),
             relabel: self.relabel,
             lists: Vec::new(),
         }
@@ -91,6 +95,8 @@ pub struct Collector1 {
 impl Collector1 {
     pub fn add_element(&mut self, token_id: [u8; WIDTH], document_id: u32, term_frequency: u32) {
         if let Some(document_id) = self.relabel[document_id as usize] {
+            self.documents[document_id as usize].0 =
+                1u32.saturating_add(self.documents[document_id as usize].0);
             self.lists.push((token_id, document_id, term_frequency));
         }
     }

@@ -14,7 +14,7 @@
 
 use crate::tuples::{JumpTuple, MetaTuple, TokenTuple, WithReader};
 use crate::vector::{Document, Query};
-use crate::{Opaque, idf, tf, tree};
+use crate::{Opaque, idf, length_to_fieldnorm, tf, tree};
 use index::relation::{Page, RelationRead};
 use score::Score;
 use std::convert::identity;
@@ -23,7 +23,7 @@ pub fn evaluate<R: RelationRead>(index: &R, document: &Document, query: &Query) 
 where
     R::Page: Page<Opaque = Opaque>,
 {
-    let document_length = document.length();
+    let fieldnorm = length_to_fieldnorm(document.length());
 
     let meta_guard = index.read(0);
     let meta_bytes = meta_guard.get(1).expect("data corruption");
@@ -69,7 +69,7 @@ where
         let token_tuple = TokenTuple::deserialize_ref(token_bytes);
         let term_frequency = value;
         let idf = idf(number_of_documents, token_tuple.number_of_documents());
-        let tf = tf(document_length, term_frequency, k1, b, avgdl);
+        let tf = tf(fieldnorm, term_frequency, k1, b, avgdl);
         result += idf * tf;
     }
     Score::from_f64(result)
