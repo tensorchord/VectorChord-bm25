@@ -32,7 +32,7 @@ pub trait SearchBuilder: 'static {
         relation: R,
         options: Self::Options,
         fetcher: impl Fetcher + 'b,
-    ) -> Box<dyn Iterator<Item = (f64, [u16; 3], bool)> + 'b>
+    ) -> Box<dyn Iterator<Item = (f64, [u16; 3])> + 'b>
     where
         R: RelationRead,
         R::Page: Page<Opaque = Self::Opaque>;

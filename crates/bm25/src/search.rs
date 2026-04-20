@@ -12,22 +12,23 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::buf::Buf;
+use crate::tape::TruncatedTapeReader;
 use crate::tuples::*;
-use crate::vector::{Bm25VectorBorrowed, Bm25VectorOwned};
-use crate::{Opaque, compression, idf, tf, tree};
+use crate::vector::{Element, Query};
+use crate::{Opaque, WIDTH, compression, idf, tf, tree};
 use always_equal::AlwaysEqual;
 use index::relation::{Page, RelationRead};
 use score::Score;
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, VecDeque};
-use std::iter::{chain, zip};
+use std::collections::BinaryHeap;
+use std::convert::identity;
+use std::iter::chain;
 use std::num::NonZero;
 
 pub fn search<R: RelationRead>(
     index: &R,
     k: NonZero<usize>,
-    query: Bm25VectorBorrowed<'_>,
+    query: &Query,
     mut filter: impl FnMut([u16; 3]) -> bool,
 ) -> Vec<(Reverse<Score>, AlwaysEqual<[u16; 3]>)>
 where
@@ -50,24 +51,26 @@ where
     let avgdl = sum_of_document_lengths as f64 / number_of_documents as f64;
 
     let mut tokens = Vec::new();
-    for &key in query.indexes() {
-        let Some(token) = tree::read(
+    for &key in query.iter() {
+        let Some(wptr_token) = tree::read(
             index,
             jump_tuple.root_tokens(),
             jump_tuple.depth_tokens(),
             key,
+            identity,
         ) else {
             continue;
         };
-        let token_guard = index.read(token.0);
-        let token_bytes = token_guard.get(token.1).expect("data corruption");
+        let token_guard = index.read(wptr_token.0);
+        let token_bytes = token_guard.get(wptr_token.1).expect("data corruption");
         let token_tuple = TokenTuple::deserialize_ref(token_bytes);
         tokens.push(Token {
-            token_id: key,
-            token_number_of_documents: token_tuple.number_of_documents(),
-            token_wand_document_length: token_tuple.wand_document_length(),
-            token_wand_term_frequency: token_tuple.wand_term_frequency(),
-            ptr_summaries: token_tuple.wptr_summaries().into_inner(),
+            id: key,
+            number_of_documents: token_tuple.number_of_documents(),
+            wand_document_length: token_tuple.wand_document_length(),
+            wand_term_frequency: token_tuple.wand_term_frequency(),
+            wptr_summaries: token_tuple.wptr_summaries(),
+            idf: idf(number_of_documents, token_tuple.number_of_documents()),
         });
     }
 
@@ -76,8 +79,7 @@ where
     {
         let first = jump_tuple.ptr_vectors();
         assert!(first != u32::MAX);
-        let mut indexes = Vec::new();
-        let mut values = Vec::new();
+        let mut elements = Vec::new();
         let mut current = first;
         while current != u32::MAX {
             let vector_guard = index.read(current);
@@ -86,43 +88,26 @@ where
                 let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
                 match vector_tuple {
                     VectorTupleReader::_2(_) => {
-                        indexes.clear();
-                        values.clear();
+                        elements.clear();
                     }
                     VectorTupleReader::_1(vector_tuple) => {
-                        indexes.extend(vector_tuple.elements().iter().map(|p| p.into_inner().0));
-                        values.extend(vector_tuple.elements().iter().map(|p| p.into_inner().1));
+                        elements.extend(vector_tuple.elements());
                     }
                     VectorTupleReader::_0(vector_tuple) => {
-                        indexes.extend(vector_tuple.elements().iter().map(|p| p.into_inner().0));
-                        values.extend(vector_tuple.elements().iter().map(|p| p.into_inner().1));
                         if !bool::from(vector_tuple.deleted()) {
-                            let document = Bm25VectorOwned::new(
-                                std::mem::take(&mut indexes),
-                                std::mem::take(&mut values),
-                            );
-                            let document = document.as_borrowed();
-                            let document_length = document.norm();
-
                             let payload = vector_tuple.payload();
-
                             if filter(payload) {
+                                elements.extend(vector_tuple.elements());
+                                let document = std::mem::take(&mut elements);
+                                let document_length = vector_tuple.length();
                                 let mut result = 0.0;
-
-                                for (&index, &value) in zip(document.indexes(), document.values()) {
-                                    if let Ok(i) =
-                                        tokens.binary_search_by_key(&index, |token| token.token_id)
-                                    {
-                                        let token = &tokens[i];
-                                        let token_number_of_documents =
-                                            token.token_number_of_documents;
-                                        let idf =
-                                            idf(number_of_documents, token_number_of_documents);
-                                        let tf = tf(k1, b, avgdl, document_length, value);
-                                        result += idf * tf;
+                                for &Element { key, value } in document.iter() {
+                                    if let Ok(i) = tokens.binary_search_by_key(&key, |t| t.id) {
+                                        let term_frequency = value;
+                                        let tf = tf(document_length, term_frequency, k1, b, avgdl);
+                                        result += tokens[i].idf * tf;
                                     }
                                 }
-
                                 results.push(result, payload);
                             }
                         }
@@ -135,18 +120,17 @@ where
 
     let mut cursors = Vec::new();
     for token in tokens {
-        cursors.push(Reverse(Box::new(Cursor::new(
+        cursors.push(Box::new(Cursor::new(
             index,
+            token.number_of_documents,
+            token.wand_document_length,
+            token.wand_term_frequency,
+            token.wptr_summaries,
+            token.idf,
             k1,
             b,
-            number_of_documents,
             avgdl,
-            token.token_id,
-            token.token_number_of_documents,
-            token.token_wand_document_length,
-            token.token_wand_term_frequency,
-            token.ptr_summaries,
-        ))));
+        )));
     }
 
     let mut tail = Vec::<Box<Cursor>>::new();
@@ -157,7 +141,7 @@ where
             for cursor in tail.iter() {
                 sum += cursor.token_upper_bound();
             }
-            while let Some(Reverse(cursor)) = head.pop() {
+            while let Some(cursor) = head.pop() {
                 if cursor.document_id() == u32::MAX {
                     break 'main;
                 }
@@ -172,23 +156,23 @@ where
         };
         let document_id = lead.document_id();
         let mut lead = vec![lead];
-        while let Some(Reverse(cursor)) = binary_heap_pop_if(&mut head, |Reverse(cursor)| {
-            document_id == cursor.document_id()
-        }) {
+        while let Some(cursor) =
+            binary_heap_pop_if(&mut head, |cursor| document_id == cursor.document_id())
+        {
             lead.push(cursor);
         }
         {
             let mut failures = tail.extract_if(.., |cursor| {
-                cursor.seek_block(index, document_id);
+                cursor.seek_block(index, document_id, k1, b, avgdl);
                 document_id < cursor.document_id()
             });
             if let Some(failure) = failures.next() {
                 for cursor in lead {
-                    head.push(Reverse(cursor));
+                    head.push(cursor);
                 }
-                head.push(Reverse(failure));
+                head.push(failure);
                 for failure in failures {
-                    head.push(Reverse(failure));
+                    head.push(failure);
                 }
                 continue 'main;
             }
@@ -206,14 +190,14 @@ where
         if results.threshold() < sum_of_block_upper_bounds {
             {
                 let mut failures = tail.extract_if(.., |cursor| {
-                    cursor.seek(index, document_id);
+                    cursor.seek(index, document_id, k1, b, avgdl);
                     document_id < cursor.document_id()
                 });
                 if let Some(failure) = failures.next() {
                     for cursor in lead {
-                        head.push(Reverse(cursor));
+                        head.push(cursor);
                     }
-                    head.push(Reverse(failure));
+                    head.push(failure);
                     continue 'main;
                 }
             };
@@ -222,6 +206,7 @@ where
                 jump_tuple.root_documents(),
                 jump_tuple.depth_documents(),
                 document_id,
+                u32::from_ne_bytes,
             )
             .expect("data corruption");
             let document_guard = index.read(document.0);
@@ -232,15 +217,14 @@ where
             if filter(payload) {
                 let mut result = 0.0;
                 for cursor in chain(tail.iter_mut(), lead.iter_mut()) {
-                    let idf = idf(number_of_documents, cursor.token_number_of_documents());
-                    let tf = tf(k1, b, avgdl, document_length, cursor.get(index));
-                    result += idf * tf;
+                    let tf = tf(document_length, cursor.get(index), k1, b, avgdl);
+                    result += cursor.idf() * tf;
                 }
                 results.push(result, payload);
             }
             for mut cursor in chain(tail, lead) {
-                cursor.seek(index, 1 + document_id);
-                head.push(Reverse(cursor));
+                cursor.seek(index, 1 + document_id, k1, b, avgdl);
+                head.push(cursor);
             }
             tail = Vec::new();
         } else {
@@ -257,7 +241,7 @@ where
             let seek_document_id = std::cmp::min(
                 1 + min_of_block_max_document_ids,
                 head.peek()
-                    .map(|Reverse(cursor)| cursor.document_id())
+                    .map(|cursor| cursor.document_id())
                     .unwrap_or(u32::MAX),
             );
             let mut cursor = {
@@ -274,34 +258,34 @@ where
                 }
                 array[argmax.0].remove(argmax.1)
             };
-            cursor.seek(index, seek_document_id);
-            head.push(Reverse(cursor));
+            cursor.seek(index, seek_document_id, k1, b, avgdl);
+            head.push(cursor);
             for cursor in lead.into_iter() {
-                head.push(Reverse(cursor));
+                head.push(cursor);
             }
         }
     }
     results.into_sorted_vec()
 }
 
-pub struct Results<T> {
+struct Results<T> {
     limit: NonZero<usize>,
     threshold: Score,
     internal: BinaryHeap<(Reverse<Score>, AlwaysEqual<T>)>,
 }
 
 impl<T> Results<T> {
-    pub fn new(limit: NonZero<usize>, threshold: f64) -> Self {
+    fn new(limit: NonZero<usize>, threshold: f64) -> Self {
         Self {
             limit,
             threshold: Score::from_f64(threshold),
             internal: BinaryHeap::new(),
         }
     }
-    pub fn threshold(&self) -> f64 {
+    fn threshold(&self) -> f64 {
         self.threshold.to_f64()
     }
-    pub fn push(&mut self, key: f64, value: T) {
+    fn push(&mut self, key: f64, value: T) {
         self.internal
             .push((Reverse(Score::from_f64(key)), AlwaysEqual(value)));
         if self.internal.len() > self.limit.get() {
@@ -311,42 +295,29 @@ impl<T> Results<T> {
             self.threshold = self.threshold.max(self.internal.peek().unwrap().0.0);
         }
     }
-    pub fn into_sorted_vec(self) -> Vec<(Reverse<Score>, AlwaysEqual<T>)> {
+    fn into_sorted_vec(self) -> Vec<(Reverse<Score>, AlwaysEqual<T>)> {
         self.internal.into_sorted_vec()
     }
 }
 
-struct Token {
-    token_id: u32,
-    token_number_of_documents: u32,
-    token_wand_document_length: u32,
-    token_wand_term_frequency: u32,
-    ptr_summaries: (u32, u16),
-}
-
 struct Cursor {
-    k1: f64,
-    b: f64,
-    number_of_documents: u32,
-    avgdl: f64,
-
-    token_id: u32,
-    token_number_of_documents: u32,
+    idf: f64,
     token_upper_bound: f64,
 
     document_id: u32,
     position_in_block: u8,
 
-    summary: Summary,
-    block: Block,
-    block_upper_bound: f64,
+    incoming: TruncatedTapeReader<Summary>,
 
-    incoming: Incoming,
+    summary: Summary,
+    block_upper_bound: f64,
+    filled: bool,
+    block: Block,
 }
 
 impl PartialEq for Cursor {
     fn eq(&self, other: &Self) -> bool {
-        self.document_id == other.document_id
+        PartialEq::eq(&other.document_id, &self.document_id)
     }
 }
 
@@ -354,272 +325,231 @@ impl Eq for Cursor {}
 
 impl PartialOrd for Cursor {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(Ord::cmp(&self.document_id, &other.document_id))
+        Some(Ord::cmp(&other.document_id, &self.document_id))
     }
 }
 
 impl Ord for Cursor {
     fn cmp(&self, other: &Self) -> Ordering {
-        Ord::cmp(&self.document_id, &other.document_id)
+        Ord::cmp(&other.document_id, &self.document_id)
     }
 }
 
 impl Cursor {
     fn new<R: RelationRead>(
         index: &R,
-        k1: f64,
-        b: f64,
-        number_of_documents: u32,
-        avgdl: f64,
-        token_id: u32,
         token_number_of_documents: u32,
         token_wand_document_length: u32,
         token_wand_term_frequency: u32,
-        ptr_summaries: (u32, u16),
+        wptr_summaries: (u32, u16),
+        idf: f64,
+        k1: f64,
+        b: f64,
+        avgdl: f64,
     ) -> Self
     where
         R::Page: Page<Opaque = Opaque>,
     {
         let token_upper_bound = {
-            let idf = idf(number_of_documents, token_number_of_documents);
             let document_length = token_wand_document_length;
             let term_frequency = token_wand_term_frequency;
-            let tf = tf(k1, b, avgdl, document_length, term_frequency);
+            let tf = tf(document_length, term_frequency, k1, b, avgdl);
             idf * tf
         };
-        let mut incoming = Incoming::new(index, token_id, ptr_summaries);
-        let summary = incoming.next(index, token_id).unwrap_or(Summary {
-            min_document_id: u32::MAX,
-            max_document_id: u32::MAX,
-            number_of_documents: 1,
-            wand_document_length: u32::MAX,
-            wand_term_frequency: 0_u32,
-            ptr_block: None,
-        });
-        let block_upper_bound = {
-            let idf = idf(number_of_documents, token_number_of_documents);
-            let document_length = summary.wand_document_length;
-            let term_frequency = summary.wand_term_frequency;
-            let tf = tf(k1, b, avgdl, document_length, term_frequency);
-            idf * tf
-        };
-        Cursor {
-            k1,
-            b,
-            number_of_documents,
-            avgdl,
-            token_id,
-            token_number_of_documents,
-            token_upper_bound,
-            document_id: summary.min_document_id,
-            position_in_block: 0,
-            summary,
-            block: Block {
-                flag: false,
-                document_ids: Buf::new(),
-                term_frequencies: Buf::new(),
-            },
-            block_upper_bound,
-            incoming,
-        }
-    }
-    fn document_id(&self) -> u32 {
-        self.document_id
-    }
-    fn token_number_of_documents(&self) -> u32 {
-        self.token_number_of_documents
-    }
-    fn block_max_document_id(&self) -> u32 {
-        self.summary.max_document_id
-    }
-    fn token_upper_bound(&self) -> f64 {
-        self.token_upper_bound
-    }
-    fn block_upper_bound(&self) -> f64 {
-        self.block_upper_bound
-    }
-    fn seek<R: RelationRead>(&mut self, index: &R, document_id: u32)
-    where
-        R::Page: Page<Opaque = Opaque>,
-    {
-        self.seek_block(index, document_id);
-        if document_id <= self.document_id {
-            return;
-        }
-        if document_id == self.summary.max_document_id {
-            self.document_id = self.summary.max_document_id;
-            self.position_in_block = self.summary.number_of_documents as u8 - 1;
-            return;
-        }
-        let block = Block::get(
-            &mut self.block,
+        let mut incoming = TruncatedTapeReader::new(
             index,
-            self.summary.min_document_id,
-            self.summary.ptr_block,
-        );
-        (self.document_id, self.position_in_block) = {
-            let i = if document_id == self.document_id + 1 {
-                self.position_in_block + 1
-            } else {
-                let start = self.position_in_block + 1;
-                let (Ok(delta) | Err(delta)) =
-                    block.document_ids.as_slice()[start as usize..].binary_search(&document_id);
-                start + delta as u8
-            };
-            (block.document_ids.as_slice()[i as usize], i)
-        };
-    }
-    fn seek_block<R: RelationRead>(&mut self, index: &R, document_id: u32)
-    where
-        R::Page: Page<Opaque = Opaque>,
-    {
-        assert!(document_id < u32::MAX);
-        debug_assert!(document_id >= self.document_id);
-        while self.summary.max_document_id < document_id {
-            self.summary = self.incoming.next(index, self.token_id).unwrap_or(Summary {
-                min_document_id: u32::MAX,
-                max_document_id: u32::MAX,
-                number_of_documents: 1,
-                wand_document_length: u32::MAX,
-                wand_term_frequency: 0,
-                ptr_block: None,
-            });
-            self.block.flag = false;
-            self.block_upper_bound = {
-                let idf = idf(self.number_of_documents, self.token_number_of_documents);
-                let document_length = self.summary.wand_document_length;
-                let term_frequency = self.summary.wand_term_frequency;
-                let tf = tf(self.k1, self.b, self.avgdl, document_length, term_frequency);
-                idf * tf
-            };
-            self.document_id = self.summary.min_document_id;
-            self.position_in_block = 0;
-        }
-    }
-    fn get<R: RelationRead>(&mut self, index: &R) -> u32
-    where
-        R::Page: Page<Opaque = Opaque>,
-    {
-        let block = Block::get(
-            &mut self.block,
-            index,
-            self.summary.min_document_id,
-            self.summary.ptr_block,
-        );
-        block.term_frequencies.as_slice()[self.position_in_block as usize]
-    }
-}
-
-struct Block {
-    flag: bool,
-    document_ids: Buf,
-    term_frequencies: Buf,
-}
-
-impl Block {
-    fn get<R: RelationRead>(
-        &mut self,
-        index: &R,
-        min_document_id: u32,
-        ptr_block: Option<(u32, u16)>,
-    ) -> &Self
-    where
-        R::Page: Page<Opaque = Opaque>,
-    {
-        if !self.flag {
-            self.flag = true;
-            let block = ptr_block.expect("cursor has reached its end");
-            let block_guard = index.read(block.0);
-            let block_bytes = block_guard.get(block.1).expect("data corruption");
-            let block_tuple = BlockTuple::deserialize_ref(block_bytes);
-            compression::decompress_document_ids(
-                min_document_id,
-                block_tuple.bitwidth_document_ids(),
-                block_tuple.compressed_document_ids(),
-                &mut self.document_ids,
-            );
-            compression::decompress_term_frequencies(
-                block_tuple.bitwidth_term_frequencies(),
-                block_tuple.compressed_term_frequencies(),
-                &mut self.term_frequencies,
-            );
-        }
-        self
-    }
-}
-
-struct Incoming {
-    buffer: VecDeque<Summary>,
-    next: u32,
-}
-
-impl Incoming {
-    fn new<R: RelationRead>(index: &R, token_id: u32, ptr_summaries: (u32, u16)) -> Self
-    where
-        R::Page: Page<Opaque = Opaque>,
-    {
-        let mut buffer = VecDeque::new();
-        let incoming = 'incoming: {
-            let summary_guard = index.read(ptr_summaries.0);
-            for j in ptr_summaries.1..=summary_guard.len() {
-                let summary_bytes = summary_guard.get(j).expect("data corruption");
-                let summary_tuple = SummaryTuple::deserialize_ref(summary_bytes);
-                if summary_tuple.token_id() != token_id {
-                    break 'incoming u32::MAX;
-                }
-                buffer.push_back(Summary {
+            wptr_summaries,
+            |bytes| {
+                let summary_tuple = SummaryTuple::deserialize_ref(bytes);
+                Summary {
                     min_document_id: summary_tuple.min_document_id(),
                     max_document_id: summary_tuple.max_document_id(),
                     number_of_documents: summary_tuple.number_of_documents(),
                     wand_term_frequency: summary_tuple.wand_term_frequency(),
                     wand_document_length: summary_tuple.wand_document_length(),
-                    ptr_block: Some(summary_tuple.wptr_block().into_inner()),
-                });
-            }
-            summary_guard.get_opaque().next
+                    wptr_block: summary_tuple.wptr_block().into_inner(),
+                }
+            },
+            token_number_of_documents.div_ceil(128),
+        );
+        let summary = next_summary(&mut incoming, index);
+        let block_upper_bound = {
+            let document_length = summary.wand_document_length;
+            let term_frequency = summary.wand_term_frequency;
+            let tf = tf(document_length, term_frequency, k1, b, avgdl);
+            idf * tf
         };
-        Self {
-            buffer,
-            next: incoming,
+        Cursor {
+            idf,
+            token_upper_bound,
+            document_id: summary.min_document_id,
+            position_in_block: 0,
+            summary,
+            block_upper_bound,
+            filled: false,
+            block: Block {
+                document_ids: compression::Decompressed::new(),
+                term_frequencies: compression::Decompressed::new(),
+            },
+            incoming,
         }
     }
-    fn next<R: RelationRead>(&mut self, index: &R, token_id: u32) -> Option<Summary>
+    fn idf(&self) -> f64 {
+        self.idf
+    }
+    fn token_upper_bound(&self) -> f64 {
+        self.token_upper_bound
+    }
+    fn document_id(&self) -> u32 {
+        self.document_id
+    }
+    fn block_max_document_id(&self) -> u32 {
+        self.summary.max_document_id
+    }
+    fn block_upper_bound(&self) -> f64 {
+        self.block_upper_bound
+    }
+    fn seek_block<R: RelationRead>(
+        &mut self,
+        index: &R,
+        document_id: u32,
+        k1: f64,
+        b: f64,
+        avgdl: f64,
+    ) where
+        R::Page: Page<Opaque = Opaque>,
+    {
+        assert!(document_id < u32::MAX);
+        debug_assert!(document_id >= self.document_id);
+        if document_id <= self.summary.max_document_id {
+            return;
+        }
+        while self.summary.max_document_id < document_id {
+            self.summary = next_summary(&mut self.incoming, index);
+        }
+        self.document_id = self.summary.min_document_id;
+        self.position_in_block = 0;
+        self.block_upper_bound = {
+            let document_length = self.summary.wand_document_length;
+            let term_frequency = self.summary.wand_term_frequency;
+            let tf = tf(document_length, term_frequency, k1, b, avgdl);
+            self.idf * tf
+        };
+        self.filled = false;
+    }
+    fn seek<R: RelationRead>(&mut self, index: &R, document_id: u32, k1: f64, b: f64, avgdl: f64)
     where
         R::Page: Page<Opaque = Opaque>,
     {
-        while self.buffer.is_empty() && self.next != u32::MAX {
-            self.next = 'incoming: {
-                let summary_guard = index.read(self.next);
-                for j in 1..=summary_guard.len() {
-                    let summary_bytes = summary_guard.get(j).expect("data corruption");
-                    let summary_tuple = SummaryTuple::deserialize_ref(summary_bytes);
-                    if summary_tuple.token_id() != token_id {
-                        break 'incoming u32::MAX;
-                    }
-                    self.buffer.push_back(Summary {
-                        min_document_id: summary_tuple.min_document_id(),
-                        max_document_id: summary_tuple.max_document_id(),
-                        number_of_documents: summary_tuple.number_of_documents(),
-                        wand_term_frequency: summary_tuple.wand_term_frequency(),
-                        wand_document_length: summary_tuple.wand_document_length(),
-                        ptr_block: Some(summary_tuple.wptr_block().into_inner()),
-                    });
-                }
-                summary_guard.get_opaque().next
-            };
+        self.seek_block(index, document_id, k1, b, avgdl);
+        if document_id <= self.document_id {
+            return;
         }
-        self.buffer.pop_front()
+        if document_id == self.summary.max_document_id {
+            self.document_id = self.summary.max_document_id;
+            self.position_in_block = self.summary.number_of_documents - 1;
+            return;
+        }
+        if !self.filled {
+            fill_block(
+                &mut self.block,
+                index,
+                self.summary.min_document_id,
+                self.summary.wptr_block,
+            );
+            self.filled = true;
+        }
+        (self.document_id, self.position_in_block) = {
+            let document_ids = self.block.document_ids.as_slice();
+            let i = if document_id == self.document_id + 1 {
+                self.position_in_block + 1
+            } else {
+                let start = self.position_in_block + 1;
+                let (Ok(delta) | Err(delta)) =
+                    document_ids[start as usize..].binary_search(&document_id);
+                start + delta as u8
+            };
+            (document_ids[i as usize], i)
+        };
     }
+    fn get<R: RelationRead>(&mut self, index: &R) -> u32
+    where
+        R::Page: Page<Opaque = Opaque>,
+    {
+        if !self.filled {
+            fill_block(
+                &mut self.block,
+                index,
+                self.summary.min_document_id,
+                self.summary.wptr_block,
+            );
+            self.filled = true;
+        }
+        self.block.term_frequencies.as_slice()[self.position_in_block as usize]
+    }
+}
+
+fn next_summary<R: RelationRead>(incoming: &mut TruncatedTapeReader<Summary>, index: &R) -> Summary
+where
+    R::Page: Page<Opaque = Opaque>,
+{
+    incoming.next(index).unwrap_or(Summary {
+        min_document_id: u32::MAX,
+        max_document_id: u32::MAX,
+        number_of_documents: 1,
+        wand_document_length: u32::MAX,
+        wand_term_frequency: 0_u32,
+        wptr_block: (u32::MAX, 0),
+    })
+}
+
+fn fill_block<R: RelationRead>(
+    block: &mut Block,
+    index: &R,
+    min_document_id: u32,
+    ptr_block: (u32, u16),
+) {
+    let block_guard = index.read(ptr_block.0);
+    let block_bytes = block_guard.get(ptr_block.1).expect("data corruption");
+    let block_tuple = BlockTuple::deserialize_ref(block_bytes);
+    compression::decompress_document_ids(
+        min_document_id,
+        block_tuple.bitwidth_document_ids(),
+        block_tuple.compressed_document_ids(),
+        &mut block.document_ids,
+    );
+    compression::decompress_term_frequencies(
+        block_tuple.bitwidth_term_frequencies(),
+        block_tuple.compressed_term_frequencies(),
+        &mut block.term_frequencies,
+    );
+}
+
+struct Token {
+    id: [u8; WIDTH],
+    number_of_documents: u32,
+    wand_document_length: u32,
+    wand_term_frequency: u32,
+    wptr_summaries: (u32, u16),
+    idf: f64,
 }
 
 struct Summary {
     min_document_id: u32,
     max_document_id: u32,
-    number_of_documents: u32,
+    number_of_documents: u8,
     wand_document_length: u32,
     wand_term_frequency: u32,
-    ptr_block: Option<(u32, u16)>,
+    wptr_block: (u32, u16),
 }
+
+struct Block {
+    document_ids: compression::Decompressed,
+    term_frequencies: compression::Decompressed,
+}
+
+// Emulate unstable library feature `binary_heap_pop_if`.
+// See https://github.com/rust-lang/rust/issues/151828.
 
 fn binary_heap_pop_if<T: Ord>(
     this: &mut BinaryHeap<T>,

@@ -12,14 +12,14 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::buf::Buf;
 use crate::segment::{Collector0, Wand};
-use crate::tape::TapeWriter;
+use crate::tape::{TapeReader, TapeWriter};
 use crate::tuples::*;
-use crate::vector::Bm25VectorOwned;
-use crate::{Opaque, compression, tree};
+use crate::vector::Document;
+use crate::{Opaque, WIDTH, compression, tree};
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
 use index::tuples::Bool;
+use std::convert::identity;
 
 pub fn maintain<R: RelationRead + RelationWrite>(index: &R, _check: impl Fn())
 where
@@ -64,40 +64,55 @@ where
     let mut collector = collector.finish();
 
     {
-        let first = jump_tuple.ptr_summaries();
-        assert!(first != u32::MAX);
-        let mut current = first;
-        while current != u32::MAX {
-            let guard = index.read(current);
-            for i in 1..=guard.len() {
-                let summary_bytes = guard.get(i).expect("data corruption");
-                let summary_tuple = SummaryTuple::deserialize_ref(summary_bytes);
-                let block_guard = index.read(summary_tuple.wptr_block().into_inner().0);
-                let block_bytes = block_guard
-                    .get(summary_tuple.wptr_block().into_inner().1)
-                    .expect("data corruption");
-                let block_tuple = BlockTuple::deserialize_ref(block_bytes);
-                let mut document_ids = Buf::new();
+        let mut tape_tokens = TapeReader::new(jump_tuple.ptr_tokens(), |bytes| {
+            let token_tuple = TokenTuple::deserialize_ref(bytes);
+            Token {
+                id: token_tuple.id(),
+                number_of_documents: token_tuple.number_of_documents(),
+            }
+        });
+        let mut tape_summaries = TapeReader::new(jump_tuple.ptr_summaries(), |bytes| {
+            let summary_tuple = SummaryTuple::deserialize_ref(bytes);
+            Summary {
+                min_document_id: summary_tuple.min_document_id(),
+                number_of_documents: summary_tuple.number_of_documents(),
+            }
+        });
+        let mut tape_blocks = TapeReader::new(jump_tuple.ptr_blocks(), |bytes| {
+            let block_tuple = BlockTuple::deserialize_ref(bytes);
+            Block {
+                bitwidth_document_ids: block_tuple.bitwidth_document_ids(),
+                compressed_document_ids: block_tuple.compressed_document_ids().to_vec(),
+                bitwidth_term_frequencies: block_tuple.bitwidth_term_frequencies(),
+                compressed_term_frequencies: block_tuple.compressed_term_frequencies().to_vec(),
+            }
+        });
+        while let Some(token) = tape_tokens.next(index) {
+            for _ in 0..token.number_of_documents.div_ceil(128) {
+                let summary = tape_summaries.next(index).expect("data corruption");
+                let block = tape_blocks.next(index).expect("data corruption");
+                let mut document_ids = compression::Decompressed::new();
                 compression::decompress_document_ids(
-                    summary_tuple.min_document_id(),
-                    block_tuple.bitwidth_document_ids(),
-                    block_tuple.compressed_document_ids(),
+                    summary.min_document_id,
+                    block.bitwidth_document_ids,
+                    &block.compressed_document_ids,
                     &mut document_ids,
                 );
-                let mut term_frequencies = Buf::new();
+                let mut term_frequencies = compression::Decompressed::new();
                 compression::decompress_term_frequencies(
-                    block_tuple.bitwidth_term_frequencies(),
-                    block_tuple.compressed_term_frequencies(),
+                    block.bitwidth_term_frequencies,
+                    &block.compressed_term_frequencies,
                     &mut term_frequencies,
                 );
-                for i in 0..summary_tuple.number_of_documents() {
+                for i in 0..summary.number_of_documents {
                     let document_id = document_ids.as_slice()[i as usize];
                     let term_frequency = term_frequencies.as_slice()[i as usize];
-                    collector.add_element(summary_tuple.token_id(), document_id, term_frequency);
+                    collector.add_element(token.id, document_id, term_frequency);
                 }
             }
-            current = guard.get_opaque().next;
         }
+        assert!(tape_summaries.next(index).is_none(), "data corruption");
+        assert!(tape_blocks.next(index).is_none(), "data corruption");
     }
 
     let mut collector = collector.finish();
@@ -105,8 +120,7 @@ where
     let ptr_vectors = {
         let first = jump_tuple.ptr_vectors();
         assert!(first != u32::MAX);
-        let mut indexes = Vec::new();
-        let mut values = Vec::new();
+        let mut elements = Vec::new();
         let mut current = first;
         let mut head = loop {
             let read = index.read(current);
@@ -118,24 +132,16 @@ where
                     let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
                     match vector_tuple {
                         VectorTupleReader::_2(_) => {
-                            indexes.clear();
-                            values.clear();
+                            elements.clear();
                         }
                         VectorTupleReader::_1(vector_tuple) => {
-                            indexes
-                                .extend(vector_tuple.elements().iter().map(|p| p.into_inner().0));
-                            values.extend(vector_tuple.elements().iter().map(|p| p.into_inner().1));
+                            elements.extend(vector_tuple.elements());
                         }
                         VectorTupleReader::_0(vector_tuple) => {
-                            indexes
-                                .extend(vector_tuple.elements().iter().map(|p| p.into_inner().0));
-                            values.extend(vector_tuple.elements().iter().map(|p| p.into_inner().1));
                             if !bool::from(vector_tuple.deleted()) {
-                                let document = Bm25VectorOwned::new(
-                                    std::mem::take(&mut indexes),
-                                    std::mem::take(&mut values),
-                                );
-                                collector.push(document.as_borrowed(), vector_tuple.payload());
+                                elements.extend(vector_tuple.elements());
+                                let document = Document::new(std::mem::take(&mut elements));
+                                collector.push(&document, vector_tuple.payload());
                             }
                         }
                     }
@@ -150,24 +156,16 @@ where
                     let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
                     match vector_tuple {
                         VectorTupleReader::_2(_) => {
-                            indexes.clear();
-                            values.clear();
+                            elements.clear();
                         }
                         VectorTupleReader::_1(vector_tuple) => {
-                            indexes
-                                .extend(vector_tuple.elements().iter().map(|p| p.into_inner().0));
-                            values.extend(vector_tuple.elements().iter().map(|p| p.into_inner().1));
+                            elements.extend(vector_tuple.elements());
                         }
                         VectorTupleReader::_0(vector_tuple) => {
-                            indexes
-                                .extend(vector_tuple.elements().iter().map(|p| p.into_inner().0));
-                            values.extend(vector_tuple.elements().iter().map(|p| p.into_inner().1));
                             if !bool::from(vector_tuple.deleted()) {
-                                let document = Bm25VectorOwned::new(
-                                    std::mem::take(&mut indexes),
-                                    std::mem::take(&mut values),
-                                );
-                                collector.push(document.as_borrowed(), vector_tuple.payload());
+                                elements.extend(vector_tuple.elements());
+                                let document = Document::new(std::mem::take(&mut elements));
+                                collector.push(&document, vector_tuple.payload());
                             }
                         }
                     }
@@ -186,16 +184,17 @@ where
     drop(jump_guard);
 
     let segment = collector.finish();
+
     let sum_of_document_lengths = segment
         .documents()
         .iter()
-        .map(|&(norm, _)| norm as u64)
+        .map(|&(document_length, _)| document_length as u64)
         .sum();
 
     let avgdl = sum_of_document_lengths as f64 / segment.documents().len() as f64;
 
-    let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index);
     let mut map_documents = Vec::new();
+    let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index);
     for (document_id, &(document_length, payload)) in segment.documents().iter().enumerate() {
         map_documents.push((
             document_id as u32,
@@ -207,27 +206,19 @@ where
             }),
         ));
     }
-    let length = |i: u32| segment.documents()[i as usize].0;
 
-    let mut tape_blocks = TapeWriter::<_, BlockTuple>::create(index);
-    let mut tape_summaries = TapeWriter::<_, SummaryTuple>::create(index);
-    let mut tape_tokens = TapeWriter::<_, TokenTuple>::create(index);
     let mut map_tokens = Vec::new();
+    let mut tape_tokens = TapeWriter::<_, TokenTuple>::create(index);
+    let mut tape_summaries = TapeWriter::<_, SummaryTuple>::create(index);
+    let mut tape_blocks = TapeWriter::<_, BlockTuple>::create(index);
     for token in segment.tokens() {
-        let token_id = token.id();
-        let number_of_documents = token.number_of_documents();
         let mut token_wand = Wand::new();
-        let mut wptr_summaries = None;
-        for block in token.blocks() {
-            let min_document_id = block.min_document_id();
-            let max_document_id = block.max_document_id();
-            let number_of_documents = block.number_of_documents();
-            let document_ids = block.document_ids();
-            let term_frequencies = block.term_frequencies();
+        let mut wptr_summaries = (tape_summaries.first(), 1);
+        for (ordinal, block) in token.blocks().enumerate() {
             let (bitwidth_document_ids, compressed_document_ids) =
-                compression::compress_document_ids(min_document_id, &document_ids);
+                compression::compress_document_ids(block.min_document_id(), &block.document_ids());
             let (bitwidth_term_frequencies, compressed_term_frequencies) =
-                compression::compress_term_frequencies(&term_frequencies);
+                compression::compress_term_frequencies(&block.term_frequencies());
             let wptr_block = tape_blocks.push(BlockTuple {
                 bitwidth_document_ids,
                 bitwidth_term_frequencies,
@@ -236,28 +227,30 @@ where
             });
             let mut block_wand = Wand::new();
             for &(_, document_id, term_frequency) in block.internal() {
-                block_wand.push(k1, b, avgdl, length(document_id), term_frequency);
+                let (document_length, _) = segment.documents()[document_id as usize];
+                block_wand.push(k1, b, avgdl, document_length, term_frequency);
             }
             token_wand.extend(&block_wand);
-            let wptr = tape_summaries.push(SummaryTuple {
-                token_id,
-                min_document_id,
-                max_document_id,
-                number_of_documents,
+            let wptr_summary = tape_summaries.push(SummaryTuple {
+                min_document_id: block.min_document_id(),
+                max_document_id: block.max_document_id(),
+                number_of_documents: block.number_of_documents(),
                 wand_document_length: block_wand.document_length(),
                 wand_term_frequency: block_wand.term_frequency(),
                 wptr_block: Pointer::new(wptr_block),
             });
-            wptr_summaries.get_or_insert(wptr);
+            if ordinal == 0 {
+                wptr_summaries = wptr_summary;
+            }
         }
         map_tokens.push((
-            token_id,
+            token.id(),
             tape_tokens.push(TokenTuple {
-                id: token_id,
-                number_of_documents,
+                id: token.id(),
+                number_of_documents: token.number_of_documents(),
                 wand_document_length: token_wand.document_length(),
                 wand_term_frequency: token_wand.term_frequency(),
-                wptr_summaries: Pointer::new(wptr_summaries.expect("empty token")),
+                wptr_summaries,
             }),
         ));
     }
@@ -276,8 +269,9 @@ where
         (*jump_tuple.ptr_blocks(), u32::MAX),
     ];
 
-    let (root_documents, depth_documents, free_documents) = tree::write(index, &map_documents);
-    let (root_tokens, depth_tokens, free_tokens) = tree::write(index, &map_tokens);
+    let (root_documents, depth_documents, free_documents) =
+        tree::write(index, &map_documents, u32::to_ne_bytes);
+    let (root_tokens, depth_tokens, free_tokens) = tree::write(index, &map_tokens, identity);
     *jump_tuple.ptr_vectors() = ptr_vectors;
     *jump_tuple.number_of_documents() = segment.documents().len() as u32;
     *jump_tuple.sum_of_document_lengths() = sum_of_document_lengths;
@@ -304,4 +298,21 @@ where
         }
     }
     index.vacuum();
+}
+
+struct Token {
+    id: [u8; WIDTH],
+    number_of_documents: u32,
+}
+
+struct Summary {
+    min_document_id: u32,
+    number_of_documents: u8,
+}
+
+struct Block {
+    bitwidth_document_ids: u8,
+    compressed_document_ids: Vec<u8>,
+    bitwidth_term_frequencies: u8,
+    compressed_term_frequencies: Vec<u8>,
 }

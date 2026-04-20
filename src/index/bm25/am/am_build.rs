@@ -12,7 +12,8 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::datatype::memory_bm25vector::Bm25VectorInput;
+use crate::datatype::memory_tsvector::TsVectorInput;
+use crate::datatype::tsvector::cast_tsvector_to_document;
 use crate::index::bm25::am::Reloption;
 use crate::index::bm25::types::*;
 use crate::index::fetcher::ctid_to_key;
@@ -152,11 +153,11 @@ pub unsafe extern "C-unwind" fn ambuild(
             if datum.is_null() {
                 break 'block None;
             }
-            let vector = unsafe { Bm25VectorInput::from_datum(datum, false).unwrap() };
-            Some(vector.as_borrowed().own())
+            let vector = unsafe { TsVectorInput::from_datum(datum, false).unwrap() };
+            Some(cast_tsvector_to_document(vector.as_borrowed()))
         };
         if let Some(document) = document {
-            collector.push(document.as_borrowed(), ctid_to_key(ctid));
+            collector.push(&document, ctid_to_key(ctid));
             indtuples += 1;
             reporter.tuples_done(indtuples);
         }

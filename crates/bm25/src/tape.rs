@@ -14,7 +14,8 @@
 
 use crate::Opaque;
 use crate::tuples::*;
-use index::relation::{Page, PageGuard, RelationWrite};
+use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 pub struct TapeWriter<'a, R, T>
@@ -162,5 +163,99 @@ where
         } else {
             panic!("implementation: a free page cannot accommodate a single tuple")
         }
+    }
+}
+
+pub struct TapeReader<T> {
+    buffer: VecDeque<T>,
+    next: u32,
+    deserialize: fn(&[u8]) -> T,
+}
+
+impl<T> TapeReader<T> {
+    pub fn new(first: u32, deserialize: fn(&[u8]) -> T) -> Self {
+        Self {
+            buffer: VecDeque::new(),
+            next: first,
+            deserialize,
+        }
+    }
+    pub fn next<R: RelationRead>(&mut self, index: &R) -> Option<T>
+    where
+        R::Page: Page<Opaque = Opaque>,
+    {
+        while self.buffer.is_empty() && self.next != u32::MAX {
+            self.next = {
+                let guard = index.read(self.next);
+                for j in 1..=guard.len() {
+                    let bytes = guard.get(j).expect("data corruption");
+                    let tuple = (self.deserialize)(bytes);
+                    self.buffer.push_back(tuple);
+                }
+                guard.get_opaque().next
+            };
+        }
+        self.buffer.pop_front()
+    }
+}
+
+pub struct TruncatedTapeReader<T> {
+    buffer: VecDeque<T>,
+    next: u32,
+    deserialize: fn(&[u8]) -> T,
+    count: u32,
+}
+
+impl<T> TruncatedTapeReader<T> {
+    pub fn new<R: RelationRead>(
+        index: &R,
+        first: (u32, u16),
+        deserialize: fn(&[u8]) -> T,
+        mut count: u32,
+    ) -> Self
+    where
+        R::Page: Page<Opaque = Opaque>,
+    {
+        let mut buffer = VecDeque::new();
+        let next = {
+            let guard = index.read(first.0);
+            for j in first.1..=guard.len() {
+                if count == 0 {
+                    break;
+                }
+                let bytes = guard.get(j).expect("data corruption");
+                let tuple = deserialize(bytes);
+                buffer.push_back(tuple);
+                count -= 1;
+            }
+            guard.get_opaque().next
+        };
+        Self {
+            buffer,
+            next,
+            deserialize,
+            count,
+        }
+    }
+    pub fn next<R: RelationRead>(&mut self, index: &R) -> Option<T>
+    where
+        R::Page: Page<Opaque = Opaque>,
+    {
+        while self.count != 0 && self.buffer.is_empty() && self.next != u32::MAX {
+            self.next = {
+                let guard = index.read(self.next);
+                for j in 1..=guard.len() {
+                    if self.count == 0 {
+                        break;
+                    }
+                    let bytes = guard.get(j).expect("data corruption");
+                    let tuple = (self.deserialize)(bytes);
+                    self.buffer.push_back(tuple);
+                    self.count -= 1;
+                }
+                guard.get_opaque().next
+            };
+        }
+        self.buffer.pop_front()
     }
 }

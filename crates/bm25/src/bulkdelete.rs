@@ -19,7 +19,7 @@ use index::tuples::Bool;
 
 pub fn bulkdelete<R: RelationRead + RelationWrite>(
     index: &R,
-    _check: impl Fn(),
+    check: impl Fn(),
     callback: impl Fn([u16; 3]) -> bool,
 ) where
     R::Page: Page<Opaque = Opaque>,
@@ -42,13 +42,14 @@ pub fn bulkdelete<R: RelationRead + RelationWrite>(
         assert!(first != u32::MAX);
         let mut current = first;
         while current != u32::MAX {
+            check();
             let read = index.read(current);
             let flag = 'flag: {
                 for i in 1..=read.len() {
-                    let bytes = read.get(i).expect("data corruption");
-                    let tuple = VectorTuple::deserialize_ref(bytes);
-                    if let VectorTupleReader::_0(tuple) = tuple {
-                        if !bool::from(tuple.deleted()) && callback(tuple.payload()) {
+                    let vector_bytes = read.get(i).expect("data corruption");
+                    let vector_tuple = VectorTuple::deserialize_ref(vector_bytes);
+                    if let VectorTupleReader::_0(vector_tuple) = vector_tuple {
+                        if !bool::from(vector_tuple.deleted()) && callback(vector_tuple.payload()) {
                             break 'flag true;
                         }
                     }
@@ -59,11 +60,12 @@ pub fn bulkdelete<R: RelationRead + RelationWrite>(
                 drop(read);
                 let mut write = index.write(current);
                 for i in 1..=write.len() {
-                    let bytes = write.get_mut(i).expect("data corruption");
-                    let tuple = VectorTuple::deserialize_mut(bytes);
-                    if let VectorTupleWriter::_0(mut tuple) = tuple {
-                        if !bool::from(*tuple.deleted()) && callback(*tuple.payload()) {
-                            *tuple.deleted() = Bool::TRUE;
+                    let vector_bytes = write.get_mut(i).expect("data corruption");
+                    let vector_tuple = VectorTuple::deserialize_mut(vector_bytes);
+                    if let VectorTupleWriter::_0(mut vector_tuple) = vector_tuple {
+                        if !bool::from(*vector_tuple.deleted()) && callback(*vector_tuple.payload())
+                        {
+                            *vector_tuple.deleted() = Bool::TRUE;
                         }
                     }
                 }
@@ -79,6 +81,7 @@ pub fn bulkdelete<R: RelationRead + RelationWrite>(
         assert!(first != u32::MAX);
         let mut current = first;
         while current != u32::MAX {
+            check();
             let read = index.read(current);
             let flag = 'flag: {
                 for i in 1..=read.len() {

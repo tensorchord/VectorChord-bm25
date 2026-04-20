@@ -12,8 +12,5 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-mod binary_bm25vector;
-mod casts_bm25vector;
-pub mod memory_bm25vector;
-mod operators_bm25vector;
-mod text_bm25vector;
+pub mod memory_tsvector;
+pub mod tsvector;

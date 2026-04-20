@@ -12,30 +12,32 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::datatype::memory_bm25vector::{Bm25VectorInput, Bm25VectorOutput};
+use crate::datatype::memory_tsvector::{TsVectorInput, TsVectorOutput};
+use crate::datatype::tsvector::{cast_tsvector_to_document, cast_tsvector_to_query};
 use crate::index::storage::PostgresRelation;
 use pgrx::pg_sys::Oid;
 use pgrx_catalog::{PgAm, PgClass, PgClassRelkind};
 use std::num::NonZero;
 
 #[pgrx::pg_extern(stable, strict, parallel_safe)]
-pub fn _bm25_evaluate(lhs: Bm25VectorInput, rhs: pgrx::composite_type!("bm25query")) -> f64 {
-    let document = lhs;
-    let indexrelid: Oid = match rhs.get_by_index(NonZero::new(1).unwrap()) {
+pub fn _bm25_evaluate(lhs: TsVectorInput, rhs: pgrx::composite_type!("bm25query")) -> f64 {
+    let vector: TsVectorOutput = match rhs.get_by_index(NonZero::new(1).unwrap()) {
         Ok(Some(s)) => s,
-        Ok(None) => pgrx::error!("Bad input: empty index at bm25query"),
+        Ok(None) => pgrx::error!("bm25query contains a null vector"),
         Err(_) => unreachable!(),
     };
-    let query: Bm25VectorOutput = match rhs.get_by_index(NonZero::new(2).unwrap()) {
+    let index: Oid = match rhs.get_by_index(NonZero::new(2).unwrap()) {
         Ok(Some(s)) => s,
-        Ok(None) => pgrx::error!("Bad input: empty vector at bm25query"),
+        Ok(None) => pgrx::error!("bm25query contains a null index"),
         Err(_) => unreachable!(),
     };
+    let lhs = cast_tsvector_to_document(lhs.as_borrowed());
+    let rhs = cast_tsvector_to_query(vector.as_borrowed());
     let pg_am = PgAm::search_amname(c"bm25").unwrap();
     let Some(pg_am) = pg_am.get() else {
-        pgrx::error!("vchord is not installed");
+        pgrx::error!("vchord_bm25 is not installed");
     };
-    let pg_class = PgClass::search_reloid(indexrelid).unwrap();
+    let pg_class = PgClass::search_reloid(index).unwrap();
     let Some(pg_class) = pg_class.get() else {
         pgrx::error!("the relation does not exist");
     };
@@ -45,9 +47,9 @@ pub fn _bm25_evaluate(lhs: Bm25VectorInput, rhs: pgrx::composite_type!("bm25quer
     if pg_class.relam() != pg_am.oid() {
         pgrx::error!("the index {:?} is not a bm25 index", pg_class.relname());
     }
-    let relation = Index::open(indexrelid, pgrx::pg_sys::AccessShareLock as _);
+    let relation = Index::open(index, pgrx::pg_sys::AccessShareLock as _);
     let index = unsafe { PostgresRelation::new(relation.raw()) };
-    let score = bm25::evaluate(&index, document.as_borrowed(), query.as_borrowed());
+    let score = bm25::evaluate(&index, &lhs, &rhs);
     -score.to_f64()
 }
 

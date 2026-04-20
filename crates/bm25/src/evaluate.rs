@@ -13,19 +13,18 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use crate::tuples::{JumpTuple, MetaTuple, TokenTuple, WithReader};
-use crate::vector::Bm25VectorBorrowed;
+use crate::vector::{Document, Query};
 use crate::{Opaque, idf, tf, tree};
 use index::relation::{Page, RelationRead};
 use score::Score;
+use std::convert::identity;
 
-pub fn evaluate<R: RelationRead>(
-    index: &R,
-    document: Bm25VectorBorrowed<'_>,
-    query: Bm25VectorBorrowed<'_>,
-) -> Score
+pub fn evaluate<R: RelationRead>(index: &R, document: &Document, query: &Query) -> Score
 where
     R::Page: Page<Opaque = Opaque>,
 {
+    let document_length = document.length();
+
     let meta_guard = index.read(0);
     let meta_bytes = meta_guard.get(1).expect("data corruption");
     let meta_tuple = MetaTuple::deserialize_ref(meta_bytes);
@@ -38,49 +37,40 @@ where
     let jump_bytes = jump_guard.get(1).expect("data corruption");
     let jump_tuple = JumpTuple::deserialize_ref(jump_bytes);
 
-    let document_length = document.norm();
-
     let sum_of_document_lengths = jump_tuple.sum_of_document_lengths();
     let number_of_documents = jump_tuple.number_of_documents();
     let avgdl = sum_of_document_lengths as f64 / number_of_documents as f64;
 
+    let mut cursor = 0_usize;
+
     let mut result = 0.0;
-    for (key, value) in meet(document, query) {
-        let Some(token) = tree::read(
+    for &key in query.iter() {
+        let value = {
+            while cursor < document.len() && document.as_slice()[cursor].key < key {
+                cursor += 1;
+            }
+            if cursor < document.len() && document.as_slice()[cursor].key == key {
+                document.as_slice()[cursor].value
+            } else {
+                continue;
+            }
+        };
+        let Some(wptr_token) = tree::read(
             index,
             jump_tuple.root_tokens(),
             jump_tuple.depth_tokens(),
             key,
+            identity,
         ) else {
             continue;
         };
-        let token_guard = index.read(token.0);
-        let token_bytes = token_guard.get(token.1).expect("data corruption");
+        let token_guard = index.read(wptr_token.0);
+        let token_bytes = token_guard.get(wptr_token.1).expect("data corruption");
         let token_tuple = TokenTuple::deserialize_ref(token_bytes);
-        let token_number_of_documents = token_tuple.number_of_documents();
-        let idf = idf(number_of_documents, token_number_of_documents);
-        let tf = tf(k1, b, avgdl, document_length, value);
+        let term_frequency = value;
+        let idf = idf(number_of_documents, token_tuple.number_of_documents());
+        let tf = tf(document_length, term_frequency, k1, b, avgdl);
         result += idf * tf;
     }
     Score::from_f64(result)
-}
-
-fn meet(
-    document: Bm25VectorBorrowed<'_>,
-    query: Bm25VectorBorrowed<'_>,
-) -> impl Iterator<Item = (u32, u32)> {
-    let (indexes, values, filter) = (document.indexes(), document.values(), query.indexes());
-    let (mut i, mut j) = (0_usize, 0_usize);
-    core::iter::from_fn(move || {
-        while i < indexes.len() && j < filter.len() {
-            let cmp = Ord::cmp(&indexes[i], &filter[j]);
-            let next = (i + cmp.is_le() as usize, j + cmp.is_ge() as usize);
-            let result = (indexes[i], values[i]);
-            (i, j) = next;
-            if cmp.is_eq() {
-                return Some(result);
-            }
-        }
-        None
-    })
 }

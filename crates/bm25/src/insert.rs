@@ -15,18 +15,16 @@
 use crate::Opaque;
 use crate::tape::TapeWriter;
 use crate::tuples::*;
-use crate::vector::Bm25VectorBorrowed;
+use crate::vector::Document;
 use index::relation::{Page, RelationRead, RelationWrite};
 use index::tuples::Bool;
-use std::iter::zip;
 
-pub fn insert<R: RelationRead + RelationWrite>(
-    index: &R,
-    document: Bm25VectorBorrowed<'_>,
-    payload: [u16; 3],
-) where
+pub fn insert<R: RelationRead + RelationWrite>(index: &R, document: &Document, payload: [u16; 3])
+where
     R::Page: Page<Opaque = Opaque>,
 {
+    let document_length = document.length();
+
     let meta_guard = index.read(0);
     let meta_bytes = meta_guard.get(1).expect("data corruption");
     let meta_tuple = MetaTuple::deserialize_ref(meta_bytes);
@@ -53,24 +51,16 @@ pub fn insert<R: RelationRead + RelationWrite>(
         }
     };
 
-    let elements = zip(
-        document.indexes().iter().copied(),
-        document.values().iter().copied(),
-    )
-    .map(Element::new)
-    .collect::<Vec<_>>();
-
     let mut tape = TapeWriter::from_guard(index, head);
-
     tape.push(VectorTuple::_2 {});
-
-    let mut remain = elements.as_slice();
+    let mut remain = document.as_slice();
     loop {
         let freespace = tape.freespace();
         if VectorTuple::estimate_size_0(remain.len()) <= freespace as usize {
             tape.tape_put(VectorTuple::_0 {
-                payload,
                 deleted: Bool::FALSE,
+                payload,
+                length: document_length,
                 elements: remain.to_vec(),
             });
             break;

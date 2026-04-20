@@ -12,9 +12,8 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::tf;
-use crate::vector::Bm25VectorBorrowed;
-use std::iter::zip;
+use crate::vector::{Document, Element};
+use crate::{WIDTH, tf};
 
 pub struct Wand {
     tf: f64,
@@ -31,7 +30,7 @@ impl Wand {
         }
     }
     pub fn push(&mut self, k1: f64, b: f64, avgdl: f64, document_length: u32, term_frequency: u32) {
-        let tf = tf(k1, b, avgdl, document_length, term_frequency);
+        let tf = tf(document_length, term_frequency, k1, b, avgdl);
         if self.tf < tf {
             self.tf = tf;
             self.document_length = document_length;
@@ -86,11 +85,11 @@ impl Collector0 {
 pub struct Collector1 {
     documents: Vec<(u32, [u16; 3])>,
     relabel: Vec<Option<u32>>,
-    lists: Vec<(u32, u32, u32)>,
+    lists: Vec<([u8; WIDTH], u32, u32)>,
 }
 
 impl Collector1 {
-    pub fn add_element(&mut self, token_id: u32, document_id: u32, term_frequency: u32) {
+    pub fn add_element(&mut self, token_id: [u8; WIDTH], document_id: u32, term_frequency: u32) {
         if let Some(document_id) = self.relabel[document_id as usize] {
             self.lists.push((token_id, document_id, term_frequency));
         }
@@ -105,7 +104,7 @@ impl Collector1 {
 
 pub struct Collector {
     documents: Vec<(u32, [u16; 3])>,
-    lists: Vec<(u32, u32, u32)>,
+    lists: Vec<([u8; WIDTH], u32, u32)>,
 }
 
 impl Collector {
@@ -115,16 +114,16 @@ impl Collector {
             lists: Vec::new(),
         }
     }
-    pub fn push(&mut self, document: Bm25VectorBorrowed<'_>, payload: [u16; 3]) {
+    pub fn push(&mut self, document: &Document, payload: [u16; 3]) {
         let document_id = self.documents.len();
         #[allow(non_contiguous_range_endpoints)]
         let Ok(document_id @ ..u32::MAX) = u32::try_from(document_id) else {
             panic!("number of documents exceeds {}", u32::MAX - 1);
         };
-        let norm = document.norm();
-        self.documents.push((norm, payload));
-        for (&token_id, &term_frequency) in zip(document.indexes(), document.values()) {
-            self.lists.push((token_id, document_id, term_frequency));
+        let document_length = document.length();
+        self.documents.push((document_length, payload));
+        for &Element { key, value } in document.iter() {
+            self.lists.push((key, document_id, value));
         }
     }
     pub fn finish(self) -> Segment {
@@ -136,7 +135,7 @@ impl Collector {
 
 pub struct Segment {
     documents: Vec<(u32, [u16; 3])>,
-    lists: Vec<(u32, u32, u32)>,
+    lists: Vec<([u8; WIDTH], u32, u32)>,
 }
 
 impl Segment {
@@ -151,11 +150,11 @@ impl Segment {
 }
 
 pub struct SegmentToken<'a> {
-    internal: &'a [(u32, u32, u32)],
+    internal: &'a [([u8; WIDTH], u32, u32)],
 }
 
 impl SegmentToken<'_> {
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> [u8; WIDTH] {
         self.internal[0].0
     }
     pub fn number_of_documents(&self) -> u32 {
@@ -169,7 +168,7 @@ impl SegmentToken<'_> {
 }
 
 pub struct SegmentBlock<'a> {
-    internal: &'a [(u32, u32, u32)],
+    internal: &'a [([u8; WIDTH], u32, u32)],
 }
 
 impl SegmentBlock<'_> {
@@ -180,10 +179,10 @@ impl SegmentBlock<'_> {
         let n = self.internal.len();
         self.internal[n - 1].1
     }
-    pub fn number_of_documents(&self) -> u32 {
-        self.internal.len() as u32
+    pub fn number_of_documents(&self) -> u8 {
+        self.internal.len() as u8
     }
-    pub fn internal(&self) -> &[(u32, u32, u32)] {
+    pub fn internal(&self) -> &[([u8; WIDTH], u32, u32)] {
         self.internal
     }
     pub fn document_ids(&self) -> Vec<u32> {

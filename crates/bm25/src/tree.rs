@@ -18,12 +18,16 @@ use crate::tuples::{Edge, NodeTuple, WithReader};
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
 use std::cmp::Ordering;
 
-pub fn write<R: RelationWrite>(index: &R, elements: &[(u32, (u32, u16))]) -> (u32, u32, u32)
+pub fn write<const BITS: usize, T: Copy + Ord, R: RelationWrite>(
+    index: &R,
+    elements: &[(T, (u32, u16))],
+    serialize: impl Fn(T) -> [u8; BITS],
+) -> (u32, u32, u32)
 where
     R::Page: Page<Opaque = Opaque>,
 {
     debug_assert!(elements.is_sorted_by_key(|(x, (_, _))| x));
-    let mut tape = BackwardTapeWriter::<_, NodeTuple>::create(index);
+    let mut tape = BackwardTapeWriter::<_, NodeTuple<BITS>>::create(index);
     let mut buffer = Vec::new();
     for chunk in elements.chunk_by(|(_, (x, _)), (_, (y, _))| x == y) {
         debug_assert!(chunk.is_sorted_by_key(|(_, (_, x))| x));
@@ -37,7 +41,7 @@ where
         let mut remain = remain.as_slice();
         while !remain.is_empty() {
             let w = {
-                let w = NodeTuple::fit(tape.freespace())
+                let w = NodeTuple::<BITS>::fit(tape.freespace())
                     .expect("implementation: a blank page cannot fit a single tuple");
                 if w == 0 {
                     panic!("implementation: a blank page cannot fit a single tuple");
@@ -45,7 +49,11 @@ where
                 w
             };
             let (left, right) = remain.split_at(std::cmp::min(w, remain.len()));
-            let edges = left.iter().copied().map(Edge::new).collect::<Vec<_>>();
+            let edges = left
+                .iter()
+                .copied()
+                .map(|(key, value)| Edge::new((serialize(key), value)))
+                .collect::<Vec<_>>();
             let key = left.last().unwrap().0;
             let wptr = tape.tape_put(NodeTuple { edges }).0;
             buffer.push((key, wptr));
@@ -58,7 +66,13 @@ where
     (root, depth, free)
 }
 
-pub fn read<R: RelationRead>(index: &R, mut root: u32, depth: u32, key: u32) -> Option<(u32, u16)> {
+pub fn read<const BITS: usize, T: Copy + Ord, R: RelationRead>(
+    index: &R,
+    mut root: u32,
+    depth: u32,
+    key: T,
+    deserialize: impl Fn([u8; BITS]) -> T,
+) -> Option<(u32, u16)> {
     if root == u32::MAX {
         return None;
     }
@@ -67,7 +81,7 @@ pub fn read<R: RelationRead>(index: &R, mut root: u32, depth: u32, key: u32) -> 
         let node_bytes = node_guard.get(1).expect("data corruption");
         let node_tuple = NodeTuple::deserialize_ref(node_bytes);
         let edges = node_tuple.edges();
-        let pos = edges.partition_point(|edge| edge.into_inner().0 < key);
+        let pos = edges.partition_point(|edge| deserialize(edge.into_inner().0) < key);
         if let Some(edge) = edges.get(pos) {
             root = edge.into_inner().1;
         } else {
@@ -81,7 +95,7 @@ pub fn read<R: RelationRead>(index: &R, mut root: u32, depth: u32, key: u32) -> 
     while l < r {
         let i = u16::midpoint(l, r);
         let leaf_bytes = leaf_guard.get(i).expect("data corruption");
-        let leaf_key = u32::from_ne_bytes(std::array::from_fn(|i| leaf_bytes[i]));
+        let leaf_key = deserialize(std::array::from_fn(|i| leaf_bytes[i]));
         match Ord::cmp(&leaf_key, &key) {
             Ordering::Less => l = i + 1,
             Ordering::Equal => return Some((root, i)),

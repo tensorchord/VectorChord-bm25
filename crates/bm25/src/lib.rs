@@ -12,7 +12,6 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-mod buf;
 mod build;
 mod bulkdelete;
 mod compression;
@@ -29,6 +28,10 @@ pub mod types;
 pub mod vector;
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+pub const WIDTH: usize = 14;
+
+const _: () = assert!(WIDTH <= 32);
 
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
@@ -63,7 +66,7 @@ fn idf(number_of_documents: u32, token_number_of_documents: u32) -> f64 {
     ((number_of_documents + 1.0) / (token_number_of_documents + 0.5)).ln()
 }
 
-fn tf(k1: f64, b: f64, avgdl: f64, document_length: u32, term_frequency: u32) -> f64 {
+fn tf(document_length: u32, term_frequency: u32, k1: f64, b: f64, avgdl: f64) -> f64 {
     let term_frequency = term_frequency as f64;
     let document_length = document_length as f64;
     (term_frequency * (k1 + 1.0)) / (term_frequency + k1 * (1.0 - b + b * document_length / avgdl))

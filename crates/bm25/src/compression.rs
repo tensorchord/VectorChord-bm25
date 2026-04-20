@@ -12,8 +12,28 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::buf::Buf;
 use zerocopy::{FromBytes, IntoBytes, Unalign};
+
+pub struct Decompressed {
+    internal: [u32; 128],
+    len: u8,
+}
+
+impl Decompressed {
+    pub fn new() -> Self {
+        Self {
+            internal: [0u32; 128],
+            len: 0,
+        }
+    }
+    pub fn set_len(&mut self, new_len: u8) {
+        assert!(new_len <= 128);
+        self.len = new_len;
+    }
+    pub fn as_slice(&self) -> &[u32] {
+        &self.internal[..self.len as usize]
+    }
+}
 
 pub fn compress_document_ids(min_document_id: u32, uncompressed: &[u32]) -> (u8, Vec<u8>) {
     debug_assert!(min_document_id <= uncompressed.iter().copied().min().unwrap_or(u32::MAX));
@@ -40,7 +60,7 @@ pub fn decompress_document_ids(
     min_document_id: u32,
     bitwidth: u8,
     compressed: &[u8],
-    decompressed: &mut Buf,
+    decompressed: &mut Decompressed,
 ) {
     if bitwidth == u8::MAX {
         let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
@@ -74,7 +94,11 @@ pub fn compress_term_frequencies(uncompressed: &[u32]) -> (u8, Vec<u8>) {
     }
 }
 
-pub fn decompress_term_frequencies(bitwidth: u8, compressed: &[u8], decompressed: &mut Buf) {
+pub fn decompress_term_frequencies(
+    bitwidth: u8,
+    compressed: &[u8],
+    decompressed: &mut Decompressed,
+) {
     if bitwidth == u8::MAX {
         let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
         let internal: &mut [Unalign<u32>; 128] =

@@ -12,159 +12,112 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
+use crate::WIDTH;
+use std::num::Saturating;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+pub fn intern(string: &[u8]) -> [u8; WIDTH] {
+    use zerocopy::FromBytes;
+    let hash = blake3::hash(string);
+    let (left, _) = <[u8; WIDTH]>::read_from_prefix(hash.as_bytes()).expect("WIDTH is too large");
+    left
+}
+
+#[repr(C, packed(2))]
+#[derive(Debug, Clone, Copy, IntoBytes, FromBytes, Immutable, KnownLayout)]
+pub struct Element {
+    pub key: [u8; WIDTH],
+    pub value: u32,
+}
+
 #[derive(Debug, Clone)]
-pub struct Bm25VectorOwned {
-    indexes: Vec<u32>,
-    values: Vec<u32>,
+pub struct Document {
+    internal: Vec<Element>,
 }
 
-impl Bm25VectorOwned {
+impl Document {
     #[inline(always)]
-    pub fn new(indexes: Vec<u32>, values: Vec<u32>) -> Self {
-        Self::new_checked(indexes, values).expect("invalid data")
+    pub fn new(internal: Vec<Element>) -> Self {
+        Self::checked_new(internal).expect("invalid data")
     }
 
     #[inline(always)]
-    pub fn new_checked(indexes: Vec<u32>, values: Vec<u32>) -> Option<Self> {
-        if indexes.len() != values.len() {
+    pub fn checked_new(internal: Vec<Element>) -> Option<Self> {
+        if !internal.is_sorted_by(|Element { key: l, .. }, Element { key: r, .. }| l < r) {
             return None;
         }
-        if u32::try_from(indexes.len()).is_err() {
+        if !internal.iter().all(|&Element { value, .. }| value != 0) {
             return None;
         }
-        if !indexes.is_sorted_by(|a, b| a < b) {
-            return None;
-        }
-        if !values.iter().all(|&x| x != 0) {
-            return None;
-        }
-        if values.iter().fold(0_u64, |x, &y| x + y as u64) > u32::MAX as u64 {
-            return None;
-        }
-        #[allow(unsafe_code)]
-        unsafe {
-            Some(Self::new_unchecked(indexes, values))
-        }
-    }
-
-    /// # Safety
-    ///
-    /// * `indexes` must have the same length as `values`.
-    /// * Length must not exceed `u32::MAX`.
-    /// * `indexes` must be a strictly increasing sequence.
-    /// * `values` must not contain zero.
-    /// * Sum of `values` must not exceed `u32::MAX`.
-    #[allow(unsafe_code)]
-    #[inline(always)]
-    pub unsafe fn new_unchecked(indexes: Vec<u32>, values: Vec<u32>) -> Self {
-        Self { indexes, values }
+        Some(Self { internal })
     }
 
     #[inline(always)]
-    pub fn indexes(&self) -> &[u32] {
-        &self.indexes
-    }
-
-    #[inline(always)]
-    pub fn values(&self) -> &[u32] {
-        &self.values
-    }
-}
-
-impl Bm25VectorOwned {
-    // type Borrowed<'a> = SVectBorrowed<'a>;
-
-    #[inline(always)]
-    pub fn as_borrowed(&self) -> Bm25VectorBorrowed<'_> {
-        Bm25VectorBorrowed {
-            indexes: &self.indexes,
-            values: &self.values,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Bm25VectorBorrowed<'a> {
-    indexes: &'a [u32],
-    values: &'a [u32],
-}
-
-impl<'a> Bm25VectorBorrowed<'a> {
-    #[inline(always)]
-    pub fn new(indexes: &'a [u32], values: &'a [u32]) -> Self {
-        Self::new_checked(indexes, values).expect("invalid data")
-    }
-
-    #[inline(always)]
-    pub fn new_checked(indexes: &'a [u32], values: &'a [u32]) -> Option<Self> {
-        if indexes.len() != values.len() {
-            return None;
-        }
-        if u32::try_from(indexes.len()).is_err() {
-            return None;
-        }
-        if !indexes.is_sorted_by(|a, b| a < b) {
-            return None;
-        }
-        if !values.iter().all(|&x| x != 0) {
-            return None;
-        }
-        if values.iter().fold(0_u64, |x, &y| x + y as u64) > u32::MAX as u64 {
-            return None;
-        }
-        #[allow(unsafe_code)]
-        unsafe {
-            Some(Self::new_unchecked(indexes, values))
-        }
-    }
-
-    /// # Safety
-    ///
-    /// * `indexes` must have the same length as `values`.
-    /// * Length must not exceed `u32::MAX`.
-    /// * `indexes` must be a strictly increasing sequence.
-    /// * `values` must not contain zero.
-    /// * Sum of `values` must not exceed `u32::MAX`.
-    #[inline(always)]
-    #[allow(unsafe_code)]
-    pub unsafe fn new_unchecked(indexes: &'a [u32], values: &'a [u32]) -> Self {
-        Self { indexes, values }
-    }
-
-    #[inline(always)]
-    pub fn indexes(&self) -> &'a [u32] {
-        self.indexes
-    }
-
-    #[inline(always)]
-    pub fn values(&self) -> &'a [u32] {
-        self.values
-    }
-
-    #[inline(always)]
-    pub fn len(&self) -> u32 {
-        self.indexes.len() as u32
+    pub fn len(&self) -> usize {
+        self.internal.len()
     }
 
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
-        self.indexes.is_empty()
+        self.internal.is_empty()
     }
 
     #[inline(always)]
-    pub fn norm(&self) -> u32 {
-        self.values.iter().sum()
+    pub fn length(&self) -> u32 {
+        self.internal
+            .iter()
+            .map(|&Element { value, .. }| Saturating(value))
+            .sum::<Saturating<u32>>()
+            .0
+    }
+
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[Element] {
+        self.internal.as_slice()
+    }
+
+    #[inline(always)]
+    pub fn iter(&self) -> impl Iterator<Item = &Element> {
+        self.internal.iter()
     }
 }
 
-impl Bm25VectorBorrowed<'_> {
-    // type Owned = SVectOwned<u32>;
+#[derive(Debug, Clone)]
+pub struct Query {
+    internal: Vec<[u8; WIDTH]>,
+}
+
+impl Query {
+    #[inline(always)]
+    pub fn new(internal: Vec<[u8; WIDTH]>) -> Self {
+        Self::checked_new(internal).expect("invalid data")
+    }
 
     #[inline(always)]
-    pub fn own(&self) -> Bm25VectorOwned {
-        Bm25VectorOwned {
-            indexes: self.indexes.to_vec(),
-            values: self.values.to_vec(),
+    pub fn checked_new(internal: Vec<[u8; WIDTH]>) -> Option<Self> {
+        if !internal.is_sorted_by(|l, r| l < r) {
+            return None;
         }
+        Some(Self { internal })
+    }
+
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.internal.len()
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.internal.is_empty()
+    }
+
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[[u8; WIDTH]] {
+        self.internal.as_slice()
+    }
+
+    #[inline(always)]
+    pub fn iter(&self) -> impl Iterator<Item = &[u8; WIDTH]> {
+        self.internal.iter()
     }
 }
