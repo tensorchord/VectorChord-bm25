@@ -20,8 +20,12 @@ use crate::{Opaque, Segment, address_documents, address_tokens, compression};
 use index::relation::{Page, RelationWrite};
 use index::tuples::Bool;
 
-pub fn build<R: RelationWrite>(bm25_options: Bm25IndexOptions, index: &R, segment: Segment)
-where
+pub fn build<R: RelationWrite>(
+    bm25_options: Bm25IndexOptions,
+    index: &R,
+    seed: [u8; 32],
+    segment: Segment,
+) where
     R::Page: Page<Opaque = Opaque>,
 {
     let k1 = bm25_options.k1;
@@ -134,5 +138,6 @@ where
         b,
         ptr_lock: { tape_lock }.first(),
         ptr_jump: ptr_jump.0,
+        seed,
     });
 }

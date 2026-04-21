@@ -31,8 +31,6 @@ pub fn _bm25_evaluate(lhs: TsVectorInput, rhs: pgrx::composite_type!("bm25query"
         Ok(None) => pgrx::error!("bm25query contains a null index"),
         Err(_) => unreachable!(),
     };
-    let lhs = cast_tsvector_to_document(lhs.as_borrowed());
-    let rhs = cast_tsvector_to_query(vector.as_borrowed());
     let pg_am = PgAm::search_amname(c"bm25").unwrap();
     let Some(pg_am) = pg_am.get() else {
         pgrx::error!("vchord_bm25 is not installed");
@@ -49,6 +47,9 @@ pub fn _bm25_evaluate(lhs: TsVectorInput, rhs: pgrx::composite_type!("bm25query"
     }
     let relation = Index::open(index, pgrx::pg_sys::AccessShareLock as _);
     let index = unsafe { PostgresRelation::new(relation.raw()) };
+    let seed = bm25::seed::seed(&index);
+    let lhs = cast_tsvector_to_document(&seed, lhs.as_borrowed());
+    let rhs = cast_tsvector_to_query(&seed, vector.as_borrowed());
     let score = bm25::evaluate(&index, &lhs, &rhs);
     -score.to_f64()
 }

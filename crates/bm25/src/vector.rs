@@ -16,14 +16,14 @@ use crate::WIDTH;
 use std::num::Saturating;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-pub fn intern(string: &[u8]) -> [u8; WIDTH] {
+pub fn intern(seed: &[u8; 32], string: &[u8]) -> [u8; WIDTH] {
     use zerocopy::FromBytes;
     if string.len() < WIDTH && !string.contains(&0) {
         let mut result = [0_u8; WIDTH];
         result[..string.len()].copy_from_slice(string);
         result
     } else {
-        let hash = blake3::hash(string);
+        let hash = blake3::keyed_hash(seed, string);
         let Ok((mut result, _)) = <[u8; WIDTH]>::read_from_prefix(hash.as_bytes()) else {
             unreachable!()
         };

@@ -53,6 +53,7 @@ struct MetaTupleHeader {
     b: f64,
     ptr_lock: u32,
     ptr_jump: u32,
+    seed: [u8; 32],
 }
 
 pub struct MetaTuple {
@@ -60,6 +61,7 @@ pub struct MetaTuple {
     pub b: f64,
     pub ptr_lock: u32,
     pub ptr_jump: u32,
+    pub seed: [u8; 32],
 }
 
 impl Tuple for MetaTuple {
@@ -72,6 +74,7 @@ impl Tuple for MetaTuple {
                 b,
                 ptr_lock,
                 ptr_jump,
+                seed,
             } => {
                 buffer.extend((MAGIC as Tag).to_ne_bytes());
                 buffer.extend(
@@ -81,6 +84,7 @@ impl Tuple for MetaTuple {
                         b: *b,
                         ptr_jump: *ptr_jump,
                         ptr_lock: *ptr_lock,
+                        seed: *seed,
                     }
                     .as_bytes(),
                 );
@@ -128,6 +132,9 @@ impl<'a> MetaTupleReader<'a> {
     }
     pub fn ptr_jump(self) -> u32 {
         self.header.ptr_jump
+    }
+    pub fn seed(self) -> [u8; 32] {
+        self.header.seed
     }
 }
 

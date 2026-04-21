@@ -25,6 +25,7 @@ use std::cmp::Reverse;
 use std::num::NonZero;
 
 pub struct DefaultBuilder {
+    seed: [u8; 32],
     orderbys: Vec<Option<Query>>,
 }
 
@@ -35,8 +36,14 @@ impl SearchBuilder for DefaultBuilder {
 
     type Opaque = bm25::Opaque;
 
-    fn new((): ()) -> Self {
+    fn new<R>(index: R, (): ()) -> Self
+    where
+        R: RelationRead,
+        R::Page: Page<Opaque = bm25::Opaque>,
+    {
+        let seed = bm25::seed::seed(&index);
         Self {
+            seed,
             orderbys: Vec::new(),
         }
     }
@@ -61,7 +68,7 @@ impl SearchBuilder for DefaultBuilder {
                         Ok(None) => pgrx::error!("bm25query contains a null vector"),
                         Err(_) => unreachable!(),
                     };
-                    Some(cast_tsvector_to_query(vector.as_borrowed()))
+                    Some(cast_tsvector_to_query(&self.seed, vector.as_borrowed()))
                 };
                 self.orderbys.push(document);
             }

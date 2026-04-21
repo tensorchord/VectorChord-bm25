@@ -26,6 +26,7 @@ mod segment;
 mod tape;
 mod tuples;
 
+pub mod seed;
 pub mod types;
 pub mod vector;
 
