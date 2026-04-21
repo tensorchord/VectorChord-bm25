@@ -23,7 +23,10 @@ pub trait SearchBuilder: 'static {
 
     type Opaque: Copy;
 
-    fn new(opfamily: Self::Opfamily) -> Self;
+    fn new<R>(relation: R, opfamily: Self::Opfamily) -> Self
+    where
+        R: RelationRead,
+        R::Page: Page<Opaque = Self::Opaque>;
 
     unsafe fn add(&mut self, strategy: u16, datum: Option<Datum>);
 

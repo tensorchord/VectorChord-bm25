@@ -81,10 +81,10 @@ impl TsVectorBorrowed<'_> {
     }
 }
 
-pub fn cast_tsvector_to_document(tsvector: TsVectorBorrowed<'_>) -> Document {
+pub fn cast_tsvector_to_document(seed: &[u8; 32], tsvector: TsVectorBorrowed<'_>) -> Document {
     let mut internal = Vec::new();
     for (string, count) in tsvector.iter() {
-        let key = intern(string);
+        let key = intern(seed, string);
         let value: u32 = count.expect("tsvector must have positions").into();
         internal.push(Element { key, value });
     }
@@ -93,10 +93,10 @@ pub fn cast_tsvector_to_document(tsvector: TsVectorBorrowed<'_>) -> Document {
     Document::new(internal)
 }
 
-pub fn cast_tsvector_to_query(tsvector: TsVectorBorrowed<'_>) -> Query {
+pub fn cast_tsvector_to_query(seed: &[u8; 32], tsvector: TsVectorBorrowed<'_>) -> Query {
     let mut internal = Vec::new();
     for (string, _) in tsvector.iter() {
-        let key = intern(string);
+        let key = intern(seed, string);
         internal.push(key);
     }
     internal.sort_unstable();

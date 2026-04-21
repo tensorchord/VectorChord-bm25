@@ -246,6 +246,7 @@ pub unsafe extern "C-unwind" fn aminsert(
     _index_info: *mut pgrx::pg_sys::IndexInfo,
 ) -> bool {
     let index = unsafe { PostgresRelation::new(index_relation) };
+    let seed = bm25::seed::seed(&index);
     let value = unsafe { (!is_null.add(0).read()).then_some(values.add(0).read()) };
     let ctid = unsafe { heap_tid.read() };
     let document = 'block: {
@@ -257,7 +258,7 @@ pub unsafe extern "C-unwind" fn aminsert(
             break 'block None;
         }
         let vector = unsafe { TsVectorInput::from_datum(datum, false).unwrap() };
-        Some(cast_tsvector_to_document(vector.as_borrowed()))
+        Some(cast_tsvector_to_document(&seed, vector.as_borrowed()))
     };
     if let Some(document) = document {
         bm25::insert(&index, &document, ctid_to_key(ctid));
@@ -361,7 +362,7 @@ pub unsafe extern "C-unwind" fn amrescan(
             })
         };
         scanner.scanning = {
-            let mut builder = DefaultBuilder::new(());
+            let mut builder = DefaultBuilder::new(index, ());
             for i in 0..(*scan).numberOfOrderBys {
                 let data = (*scan).orderByData.add(i as usize);
                 let value = (*data).sk_argument;

@@ -130,6 +130,7 @@ pub unsafe extern "C-unwind" fn ambuild(
     };
     reporter.tuples_total(unsafe { (*(*index_relation).rd_rel).reltuples as u64 });
     reporter.phase(BuildPhase::from_code(BuildPhaseCode::Build));
+    let seed = bm25::seed::random();
     let index = unsafe { PostgresRelation::new(index_relation) };
     let traverser = unsafe {
         HeapTraverser::new(
@@ -154,7 +155,7 @@ pub unsafe extern "C-unwind" fn ambuild(
                 break 'block None;
             }
             let vector = unsafe { TsVectorInput::from_datum(datum, false).unwrap() };
-            Some(cast_tsvector_to_document(vector.as_borrowed()))
+            Some(cast_tsvector_to_document(&seed, vector.as_borrowed()))
         };
         if let Some(document) = document {
             collector.push(&document, ctid_to_key(ctid));
@@ -163,7 +164,7 @@ pub unsafe extern "C-unwind" fn ambuild(
         }
     });
     let segment = collector.finish();
-    bm25::build(bm25_options.index, &index, segment);
+    bm25::build(bm25_options.index, &index, seed, segment);
     unsafe { pgrx::pgbox::PgBox::<pgrx::pg_sys::IndexBuildResult>::alloc0().into_pg() }
 }
 
