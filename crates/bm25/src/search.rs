@@ -506,12 +506,12 @@ fn fill_block<R: RelationRead>(
     let block_tuple = BlockTuple::deserialize_ref(block_bytes);
     compression::decompress_document_ids(
         min_document_id,
-        block_tuple.bitwidth_document_ids(),
+        block_tuple.metadata_document_ids(),
         block_tuple.compressed_document_ids(),
         &mut block.document_ids,
     );
     compression::decompress_term_frequencies(
-        block_tuple.bitwidth_term_frequencies(),
+        block_tuple.metadata_term_frequencies(),
         block_tuple.compressed_term_frequencies(),
         &mut block.term_frequencies,
     );

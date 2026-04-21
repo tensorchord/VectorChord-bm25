@@ -28,6 +28,8 @@ pub mod bitpacking_u16_ordered;
 pub mod bitpacking_u16_unordered;
 pub mod bitpacking_u32_ordered;
 pub mod bitpacking_u32_unordered;
+pub mod bytepacking_u32_ordered;
+pub mod bytepacking_u32_unordered;
 
 #[doc(hidden)]
 pub mod internal {
