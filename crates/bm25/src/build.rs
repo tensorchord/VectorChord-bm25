@@ -56,14 +56,14 @@ where
         let mut token_wand = Wand::new();
         let mut wptr_summaries = (tape_summaries.first(), 1);
         for (ordinal, block) in token.blocks().enumerate() {
-            let (bitwidth_document_ids, compressed_document_ids) =
+            let (metadata_document_ids, compressed_document_ids) =
                 compression::compress_document_ids(block.min_document_id(), &block.document_ids());
-            let (bitwidth_term_frequencies, compressed_term_frequencies) =
+            let (metadata_term_frequencies, compressed_term_frequencies) =
                 compression::compress_term_frequencies(&block.term_frequencies());
             let wptr_block = tape_blocks.push(BlockTuple {
-                bitwidth_document_ids,
-                bitwidth_term_frequencies,
+                metadata_document_ids,
                 compressed_document_ids,
+                metadata_term_frequencies,
                 compressed_term_frequencies,
             });
             let mut block_wand = Wand::new();

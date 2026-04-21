@@ -12,8 +12,6 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use zerocopy::{FromBytes, IntoBytes, Unalign};
-
 pub struct Decompressed {
     internal: [u32; 128],
     len: u8,
@@ -50,25 +48,29 @@ pub fn compress_document_ids(min_document_id: u32, uncompressed: &[u32]) -> (u8,
             uncompressed,
             compressed.as_mut(),
         );
-        (bitwidth, compressed)
+        ((0u8 << 7) | bitwidth, compressed)
     } else {
-        (u8::MAX, uncompressed.as_bytes().to_vec())
+        let bytewidth = simd::bytepacking_u32_ordered::bytewidth(min_document_id, uncompressed);
+        let mut compressed = vec![0_u8; bytewidth as usize * uncompressed.len()];
+        simd::bytepacking_u32_ordered::compress(
+            min_document_id,
+            bytewidth,
+            uncompressed,
+            compressed.as_mut(),
+        );
+        ((1u8 << 7) | bytewidth, compressed)
     }
 }
 
 pub fn decompress_document_ids(
     min_document_id: u32,
-    bitwidth: u8,
+    metadata: u8,
     compressed: &[u8],
     decompressed: &mut Decompressed,
 ) {
-    if bitwidth == u8::MAX {
-        let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
-        let internal: &mut [Unalign<u32>; 128] =
-            zerocopy::transmute_mut!(&mut decompressed.internal);
-        internal[..d.len()].copy_from_slice(d);
-        decompressed.set_len(d.len() as u8);
-    } else {
+    let flags = metadata >> 7;
+    if flags == 0 {
+        let bitwidth = metadata & ((1 << 7) - 1);
         simd::bitpacking_u32_ordered::decompress(
             min_document_id,
             bitwidth,
@@ -76,6 +78,16 @@ pub fn decompress_document_ids(
             &mut decompressed.internal,
         );
         decompressed.set_len(128);
+    } else {
+        let bytewidth = metadata & ((1 << 7) - 1);
+        let new_len = compressed.len() / bytewidth as usize;
+        simd::bytepacking_u32_ordered::decompress(
+            min_document_id,
+            bytewidth,
+            compressed,
+            &mut decompressed.internal[..new_len],
+        );
+        decompressed.set_len(new_len as u8);
     }
 }
 
@@ -88,29 +100,37 @@ pub fn compress_term_frequencies(uncompressed: &[u32]) -> (u8, Vec<u8>) {
         let bitwidth = simd::bitpacking_u32_unordered::bitwidth(uncompressed);
         let mut compressed = vec![0_u8; 128 * (bitwidth as usize) / 8];
         simd::bitpacking_u32_unordered::compress(bitwidth, uncompressed, compressed.as_mut());
-        (bitwidth, compressed)
+        ((0u8 << 7) | bitwidth, compressed)
     } else {
-        (u8::MAX, uncompressed.as_bytes().to_vec())
+        let bytewidth = simd::bytepacking_u32_unordered::bytewidth(uncompressed);
+        let mut compressed = vec![0_u8; bytewidth as usize * uncompressed.len()];
+        simd::bytepacking_u32_unordered::compress(bytewidth, uncompressed, compressed.as_mut());
+        ((1u8 << 7) | bytewidth, compressed)
     }
 }
 
 pub fn decompress_term_frequencies(
-    bitwidth: u8,
+    metadata: u8,
     compressed: &[u8],
     decompressed: &mut Decompressed,
 ) {
-    if bitwidth == u8::MAX {
-        let d = <[Unalign<u32>]>::ref_from_bytes(compressed).expect("data corruption");
-        let internal: &mut [Unalign<u32>; 128] =
-            zerocopy::transmute_mut!(&mut decompressed.internal);
-        internal[..d.len()].copy_from_slice(d);
-        decompressed.set_len(d.len() as u8);
-    } else {
+    let flags = metadata >> 7;
+    if flags == 0 {
+        let bitwidth = metadata & ((1 << 7) - 1);
         simd::bitpacking_u32_unordered::decompress(
             bitwidth,
             compressed,
             &mut decompressed.internal,
         );
         decompressed.set_len(128);
+    } else {
+        let bytewidth = metadata & ((1 << 7) - 1);
+        let new_len = compressed.len() / bytewidth as usize;
+        simd::bytepacking_u32_unordered::decompress(
+            bytewidth,
+            compressed,
+            &mut decompressed.internal[..new_len],
+        );
+        decompressed.set_len(new_len as u8);
     }
 }

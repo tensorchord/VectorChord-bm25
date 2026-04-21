@@ -77,9 +77,9 @@ where
         let mut tape_blocks = TapeReader::new(jump_tuple.ptr_blocks(), |bytes| {
             let block_tuple = BlockTuple::deserialize_ref(bytes);
             Block {
-                bitwidth_document_ids: block_tuple.bitwidth_document_ids(),
+                metadata_document_ids: block_tuple.metadata_document_ids(),
                 compressed_document_ids: block_tuple.compressed_document_ids().to_vec(),
-                bitwidth_term_frequencies: block_tuple.bitwidth_term_frequencies(),
+                metadata_term_frequencies: block_tuple.metadata_term_frequencies(),
                 compressed_term_frequencies: block_tuple.compressed_term_frequencies().to_vec(),
             }
         });
@@ -90,13 +90,13 @@ where
                 let mut document_ids = compression::Decompressed::new();
                 compression::decompress_document_ids(
                     summary.min_document_id,
-                    block.bitwidth_document_ids,
+                    block.metadata_document_ids,
                     &block.compressed_document_ids,
                     &mut document_ids,
                 );
                 let mut term_frequencies = compression::Decompressed::new();
                 compression::decompress_term_frequencies(
-                    block.bitwidth_term_frequencies,
+                    block.metadata_term_frequencies,
                     &block.compressed_term_frequencies,
                     &mut term_frequencies,
                 );
@@ -223,14 +223,14 @@ where
         let mut token_wand = Wand::new();
         let mut wptr_summaries = (tape_summaries.first(), 1);
         for (ordinal, block) in token.blocks().enumerate() {
-            let (bitwidth_document_ids, compressed_document_ids) =
+            let (metadata_document_ids, compressed_document_ids) =
                 compression::compress_document_ids(block.min_document_id(), &block.document_ids());
-            let (bitwidth_term_frequencies, compressed_term_frequencies) =
+            let (metadata_term_frequencies, compressed_term_frequencies) =
                 compression::compress_term_frequencies(&block.term_frequencies());
             let wptr_block = tape_blocks.push(BlockTuple {
-                bitwidth_document_ids,
-                bitwidth_term_frequencies,
+                metadata_document_ids,
                 compressed_document_ids,
+                metadata_term_frequencies,
                 compressed_term_frequencies,
             });
             let mut block_wand = Wand::new();
@@ -327,8 +327,8 @@ struct Summary {
 }
 
 struct Block {
-    bitwidth_document_ids: u8,
+    metadata_document_ids: u8,
     compressed_document_ids: Vec<u8>,
-    bitwidth_term_frequencies: u8,
+    metadata_term_frequencies: u8,
     compressed_term_frequencies: Vec<u8>,
 }

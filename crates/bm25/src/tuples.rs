@@ -966,8 +966,8 @@ impl<'a> SummaryTupleReader<'a> {
 #[repr(C, align(8))]
 #[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 struct BlockTupleHeader {
-    bitwidth_document_ids: u8,
-    bitwidth_term_frequencies: u8,
+    metadata_document_ids: u8,
+    metadata_term_frequencies: u8,
     compressed_document_ids_s: u16,
     compressed_document_ids_e: u16,
     compressed_term_frequencies_s: u16,
@@ -976,9 +976,9 @@ struct BlockTupleHeader {
 }
 
 pub struct BlockTuple {
-    pub bitwidth_document_ids: u8,
-    pub bitwidth_term_frequencies: u8,
+    pub metadata_document_ids: u8,
     pub compressed_document_ids: Vec<u8>,
+    pub metadata_term_frequencies: u8,
     pub compressed_term_frequencies: Vec<u8>,
 }
 
@@ -1003,8 +1003,8 @@ impl Tuple for BlockTuple {
         // header
         buffer[..size_of::<BlockTupleHeader>()].copy_from_slice(
             BlockTupleHeader {
-                bitwidth_document_ids: self.bitwidth_document_ids,
-                bitwidth_term_frequencies: self.bitwidth_term_frequencies,
+                metadata_document_ids: self.metadata_document_ids,
+                metadata_term_frequencies: self.metadata_term_frequencies,
                 compressed_document_ids_s,
                 compressed_document_ids_e,
                 compressed_term_frequencies_s,
@@ -1047,14 +1047,14 @@ pub struct BlockTupleReader<'a> {
 }
 
 impl<'a> BlockTupleReader<'a> {
-    pub fn bitwidth_document_ids(self) -> u8 {
-        self.header.bitwidth_document_ids
-    }
-    pub fn bitwidth_term_frequencies(self) -> u8 {
-        self.header.bitwidth_term_frequencies
+    pub fn metadata_document_ids(self) -> u8 {
+        self.header.metadata_document_ids
     }
     pub fn compressed_document_ids(self) -> &'a [u8] {
         self.compressed_document_ids
+    }
+    pub fn metadata_term_frequencies(self) -> u8 {
+        self.header.metadata_term_frequencies
     }
     pub fn compressed_term_frequencies(self) -> &'a [u8] {
         self.compressed_term_frequencies
