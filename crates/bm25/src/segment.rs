@@ -13,150 +13,38 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use crate::WIDTH;
-use crate::vector::{Document, Element};
+use std::cmp::Ordering;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-pub struct Collector0 {
-    documents: Vec<[u16; 3]>,
-    relabel: Vec<Option<u32>>,
-}
+#[repr(C, packed(2))]
+#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct Record(pub u32, pub [u16; 3]);
 
-impl Collector0 {
-    pub fn new() -> Self {
-        Self {
-            documents: Vec::new(),
-            relabel: Vec::new(),
-        }
-    }
-    pub fn add_document(&mut self, data: Option<[u16; 3]>) {
-        if let Some(data) = data {
-            let id = self.documents.len() as u32;
-            self.documents.push(data);
-            self.relabel.push(Some(id));
-        } else {
-            self.relabel.push(None);
-        }
-    }
-    pub fn finish(self) -> Collector1 {
-        Collector1 {
-            documents: self
-                .documents
-                .into_iter()
-                .map(|payload| (0, payload))
-                .collect(),
-            relabel: self.relabel,
-            lists: Vec::new(),
-        }
+#[repr(C)]
+#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct Mapping(pub [u8; WIDTH], pub u32, pub u32);
+
+impl PartialEq for Mapping {
+    fn eq(&self, other: &Self) -> bool {
+        (self.0, self.1).eq(&(other.0, other.1))
     }
 }
 
-pub struct Collector1 {
-    documents: Vec<(u32, [u16; 3])>,
-    relabel: Vec<Option<u32>>,
-    lists: Vec<([u8; WIDTH], u32, u32)>,
-}
+impl Eq for Mapping {}
 
-impl Collector1 {
-    pub fn add_element(&mut self, token_id: [u8; WIDTH], document_id: u32, term_frequency: u32) {
-        if let Some(document_id) = self.relabel[document_id as usize] {
-            self.documents[document_id as usize].0 =
-                1u32.saturating_add(self.documents[document_id as usize].0);
-            self.lists.push((token_id, document_id, term_frequency));
-        }
-    }
-    pub fn finish(self) -> Collector {
-        Collector {
-            documents: self.documents,
-            lists: self.lists,
-        }
+impl PartialOrd for Mapping {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-pub struct Collector {
-    documents: Vec<(u32, [u16; 3])>,
-    lists: Vec<([u8; WIDTH], u32, u32)>,
-}
-
-impl Collector {
-    pub fn new() -> Self {
-        Self {
-            documents: Vec::new(),
-            lists: Vec::new(),
-        }
-    }
-    pub fn push(&mut self, document: &Document, payload: [u16; 3]) {
-        let document_id = self.documents.len();
-        #[allow(non_contiguous_range_endpoints)]
-        let Ok(document_id @ ..u32::MAX) = u32::try_from(document_id) else {
-            panic!("number of documents exceeds {}", u32::MAX - 1);
-        };
-        self.documents.push((document.length(), payload));
-        for &Element { key, value } in document.iter() {
-            self.lists.push((key, document_id, value));
-        }
-    }
-    pub fn finish(self) -> Segment {
-        let (documents, mut lists) = (self.documents, self.lists);
-        lists.sort_unstable_by_key(|&(token_id, document_id, _)| (token_id, document_id));
-        Segment { documents, lists }
+impl Ord for Mapping {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.0, self.1).cmp(&(other.0, other.1))
     }
 }
 
-pub struct Segment {
-    documents: Vec<(u32, [u16; 3])>,
-    lists: Vec<([u8; WIDTH], u32, u32)>,
-}
-
-impl Segment {
-    pub fn documents(&self) -> &[(u32, [u16; 3])] {
-        self.documents.as_slice()
-    }
-    pub fn tokens(&self) -> impl Iterator<Item = SegmentToken<'_>> {
-        self.lists
-            .chunk_by(|&(x, ..), &(y, ..)| x == y)
-            .map(|internal| SegmentToken { internal })
-    }
-}
-
-pub struct SegmentToken<'a> {
-    internal: &'a [([u8; WIDTH], u32, u32)],
-}
-
-impl SegmentToken<'_> {
-    pub fn id(&self) -> [u8; WIDTH] {
-        self.internal[0].0
-    }
-    pub fn number_of_documents(&self) -> u32 {
-        self.internal.len() as u32
-    }
-    pub fn blocks(&self) -> impl Iterator<Item = SegmentBlock<'_>> {
-        self.internal
-            .chunks(128)
-            .map(|internal| SegmentBlock { internal })
-    }
-}
-
-pub struct SegmentBlock<'a> {
-    internal: &'a [([u8; WIDTH], u32, u32)],
-}
-
-impl SegmentBlock<'_> {
-    pub fn min_document_id(&self) -> u32 {
-        self.internal[0].1
-    }
-    pub fn max_document_id(&self) -> u32 {
-        let n = self.internal.len();
-        self.internal[n - 1].1
-    }
-    pub fn number_of_documents(&self) -> u8 {
-        self.internal.len() as u8
-    }
-    pub fn internal(&self) -> &[([u8; WIDTH], u32, u32)] {
-        self.internal
-    }
-    pub fn document_ids(&self) -> Vec<u32> {
-        self.internal.iter().map(|&(_, x, _)| x).collect()
-    }
-    pub fn term_frequencies(&self) -> Vec<u32> {
-        self.internal.iter().map(|&(_, _, x)| x).collect()
-    }
+pub struct Segment<R, M> {
+    pub records: R,
+    pub mappings: M,
 }

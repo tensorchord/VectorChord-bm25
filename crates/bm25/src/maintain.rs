@@ -12,14 +12,13 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::bm25::{Wand, length_to_fieldnorm};
-use crate::segment::Collector0;
-use crate::tape::{TapeReader, TapeWriter};
+use crate::io::{MappingsWriter, RecordsWriter};
+use crate::segment::{Mapping, Record};
+use crate::tape::TapeReader;
 use crate::tuples::*;
 use crate::vector::Document;
-use crate::{Opaque, WIDTH, address_documents, address_tokens, compression};
+use crate::{Opaque, WIDTH, compression};
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
-use index::tuples::Bool;
 
 pub fn maintain<R: RelationRead + RelationWrite>(index: &R, _check: impl Fn())
 where
@@ -36,7 +35,7 @@ where
 
     let _lock_guard = index.write(ptr_lock);
 
-    let mut collector = Collector0::new();
+    let mut collector_0 = Collector0::new();
 
     let jump_guard = index.read(ptr_jump);
     let jump_bytes = jump_guard.get(1).expect("data corruption");
@@ -51,13 +50,15 @@ where
             for i in 1..=guard.len() {
                 let bytes = guard.get(i).expect("data corruption");
                 let tuple = DocumentTuple::deserialize_ref(bytes);
-                collector.add_document((!bool::from(tuple.deleted())).then_some(tuple.payload()));
+                collector_0.add_document((!bool::from(tuple.deleted())).then_some(tuple.payload()));
             }
             current = guard.get_opaque().next;
         }
     }
 
-    let mut collector = collector.finish();
+    let tempdir = tempfile::tempdir().expect("failed to create temporary directory");
+
+    let mut collector_1 = collector_0.finish(crate::io::mappings_writer(tempdir.path(), 0));
 
     {
         let mut tape_tokens = TapeReader::new(jump_tuple.ptr_tokens(), |bytes| {
@@ -103,7 +104,7 @@ where
                 for i in 0..summary.number_of_documents {
                     let document_id = document_ids.as_slice()[i as usize];
                     let term_frequency = term_frequencies.as_slice()[i as usize];
-                    collector.add_element(token.id, document_id, term_frequency);
+                    collector_1.add_element(token.id, document_id, term_frequency);
                 }
             }
         }
@@ -111,7 +112,8 @@ where
         assert!(tape_blocks.next(index).is_none(), "data corruption");
     }
 
-    let mut collector = collector.finish();
+    let (mut records_writer, mut mappings_writer) =
+        collector_1.finish(crate::io::records_writer(tempdir.path(), 0));
 
     let ptr_vectors = {
         let first = jump_tuple.ptr_vectors();
@@ -142,7 +144,12 @@ where
                                 if !bool::from(vector_tuple.deleted()) {
                                     internal.extend(vector_tuple.elements());
                                     let document = Document::new(internal);
-                                    collector.push(&document, vector_tuple.payload());
+                                    crate::io::write(
+                                        &mut records_writer,
+                                        &mut mappings_writer,
+                                        &document,
+                                        vector_tuple.payload(),
+                                    );
                                 }
                             } else {
                                 panic!("data corruption");
@@ -174,7 +181,12 @@ where
                                 if !bool::from(vector_tuple.deleted()) {
                                     internal.extend(vector_tuple.elements());
                                     let document = Document::new(internal);
-                                    collector.push(&document, vector_tuple.payload());
+                                    crate::io::write(
+                                        &mut records_writer,
+                                        &mut mappings_writer,
+                                        &document,
+                                        vector_tuple.payload(),
+                                    );
                                 }
                             } else {
                                 panic!("data corruption");
@@ -195,79 +207,14 @@ where
 
     drop(jump_guard);
 
-    let segment = collector.finish();
+    records_writer.flush();
+    mappings_writer.flush();
+    drop(records_writer);
+    drop(mappings_writer);
+    crate::io::locally_merge(tempdir.path(), 0);
 
-    let sum_of_document_lengths = segment
-        .documents()
-        .iter()
-        .map(|&(document_length, _)| document_length as u64)
-        .sum();
-
-    let avgdl = sum_of_document_lengths as f64 / segment.documents().len() as f64;
-
-    let mut map_documents = Vec::new();
-    let mut tape_documents = TapeWriter::<_, DocumentTuple>::create(index);
-    for &(document_length, payload) in segment.documents().iter() {
-        map_documents.push(tape_documents.push(DocumentTuple {
-            fieldnorm: length_to_fieldnorm(document_length),
-            payload,
-            deleted: Bool::FALSE,
-        }));
-    }
-
-    let mut map_tokens = Vec::new();
-    let mut tape_tokens = TapeWriter::<_, TokenTuple>::create(index);
-    let mut tape_summaries = TapeWriter::<_, SummaryTuple>::create(index);
-    let mut tape_blocks = TapeWriter::<_, BlockTuple>::create(index);
-    for token in segment.tokens() {
-        let mut token_wand = Wand::new();
-        let mut wptr_summaries = (tape_summaries.first(), 1);
-        for (ordinal, block) in token.blocks().enumerate() {
-            let (metadata_document_ids, compressed_document_ids) =
-                compression::compress_document_ids(block.min_document_id(), &block.document_ids());
-            let (metadata_term_frequencies, compressed_term_frequencies) =
-                compression::compress_term_frequencies(&block.term_frequencies());
-            let wptr_block = tape_blocks.push(BlockTuple {
-                metadata_document_ids,
-                compressed_document_ids,
-                metadata_term_frequencies,
-                compressed_term_frequencies,
-            });
-            let mut block_wand = Wand::new();
-            for &(_, document_id, term_frequency) in block.internal() {
-                let (document_length, _) = segment.documents()[document_id as usize];
-                block_wand.push(
-                    length_to_fieldnorm(document_length),
-                    term_frequency,
-                    k1,
-                    b,
-                    avgdl,
-                );
-            }
-            token_wand.extend(&block_wand);
-            let wptr_summary = tape_summaries.push(SummaryTuple {
-                min_document_id: block.min_document_id(),
-                max_document_id: block.max_document_id(),
-                number_of_documents: block.number_of_documents(),
-                wand_fieldnorm: block_wand.fieldnorm(),
-                wand_term_frequency: block_wand.term_frequency(),
-                wptr_block: Pointer::new(wptr_block),
-            });
-            if ordinal == 0 {
-                wptr_summaries = wptr_summary;
-            }
-        }
-        map_tokens.push((
-            token.id(),
-            tape_tokens.push(TokenTuple {
-                id: token.id(),
-                number_of_documents: token.number_of_documents(),
-                wand_fieldnorm: token_wand.fieldnorm(),
-                wand_term_frequency: token_wand.term_frequency(),
-                wptr_summaries,
-            }),
-        ));
-    }
+    let segment = crate::io::readers(tempdir.path(), 1);
+    let flushed = crate::flush::flush(k1, b, index, segment);
 
     let mut jump_guard = index.write(ptr_jump);
     let jump_bytes = jump_guard.get_mut(1).expect("data corruption");
@@ -283,24 +230,21 @@ where
         (*jump_tuple.ptr_blocks(), u32::MAX),
     ];
 
-    let (width_1_documents, width_0_documents, depth_documents, start_documents, free_documents) =
-        address_documents::write(index, &map_documents);
-    let (depth_tokens, start_tokens, free_tokens) = address_tokens::write(index, &map_tokens);
     *jump_tuple.ptr_vectors() = ptr_vectors;
-    *jump_tuple.number_of_documents() = segment.documents().len() as u32;
-    *jump_tuple.sum_of_document_lengths() = sum_of_document_lengths;
-    *jump_tuple.width_1_documents() = width_1_documents;
-    *jump_tuple.width_0_documents() = width_0_documents;
-    *jump_tuple.depth_documents() = depth_documents;
-    *jump_tuple.start_documents() = start_documents;
-    *jump_tuple.free_documents() = free_documents;
-    *jump_tuple.depth_tokens() = depth_tokens;
-    *jump_tuple.start_tokens() = start_tokens;
-    *jump_tuple.free_tokens() = free_tokens;
-    *jump_tuple.ptr_documents() = { tape_documents }.first();
-    *jump_tuple.ptr_tokens() = { tape_tokens }.first();
-    *jump_tuple.ptr_summaries() = { tape_summaries }.first();
-    *jump_tuple.ptr_blocks() = { tape_blocks }.first();
+    *jump_tuple.number_of_documents() = flushed.number_of_documents;
+    *jump_tuple.sum_of_document_lengths() = flushed.sum_of_document_lengths;
+    *jump_tuple.width_1_documents() = flushed.width_1_documents;
+    *jump_tuple.width_0_documents() = flushed.width_0_documents;
+    *jump_tuple.depth_documents() = flushed.depth_documents;
+    *jump_tuple.start_documents() = flushed.start_documents;
+    *jump_tuple.free_documents() = flushed.free_documents;
+    *jump_tuple.depth_tokens() = flushed.depth_tokens;
+    *jump_tuple.start_tokens() = flushed.start_tokens;
+    *jump_tuple.free_tokens() = flushed.free_tokens;
+    *jump_tuple.ptr_documents() = flushed.ptr_documents;
+    *jump_tuple.ptr_tokens() = flushed.ptr_tokens;
+    *jump_tuple.ptr_summaries() = flushed.ptr_summaries;
+    *jump_tuple.ptr_blocks() = flushed.ptr_blocks;
 
     drop(jump_guard);
 
@@ -313,6 +257,7 @@ where
             current = next;
         }
     }
+
     index.vacuum();
 }
 
@@ -331,4 +276,59 @@ struct Block {
     compressed_document_ids: Vec<u8>,
     metadata_term_frequencies: u8,
     compressed_term_frequencies: Vec<u8>,
+}
+
+struct Collector0 {
+    records: Vec<Record>,
+    relabel: Vec<u32>,
+}
+
+impl Collector0 {
+    fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            relabel: Vec::new(),
+        }
+    }
+    fn add_document(&mut self, payload: Option<[u16; 3]>) {
+        if let Some(payload) = payload {
+            let id = self.records.len() as u32;
+            self.records.push(Record(0_u32, payload));
+            self.relabel.push(id);
+        } else {
+            self.relabel.push(u32::MAX);
+        }
+    }
+    fn finish(self, mappings_writer: MappingsWriter) -> Collector1 {
+        Collector1 {
+            records: self.records,
+            relabel: self.relabel,
+            mappings_writer,
+        }
+    }
+}
+
+struct Collector1 {
+    records: Vec<Record>,
+    relabel: Vec<u32>,
+    mappings_writer: MappingsWriter,
+}
+
+impl Collector1 {
+    fn add_element(&mut self, token_id: [u8; WIDTH], document_id: u32, term_frequency: u32) {
+        let document_id = self.relabel[document_id as usize];
+        if document_id == u32::MAX {
+            return;
+        }
+        self.records[document_id as usize].0 =
+            1u32.saturating_add(self.records[document_id as usize].0);
+        self.mappings_writer
+            .write(Mapping(token_id, document_id, term_frequency));
+    }
+    fn finish(self, mut records_writer: RecordsWriter) -> (RecordsWriter, MappingsWriter) {
+        for record in self.records {
+            records_writer.write(record);
+        }
+        (records_writer, self.mappings_writer)
+    }
 }
