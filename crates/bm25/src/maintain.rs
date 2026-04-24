@@ -12,13 +12,16 @@
 //
 // Copyright (c) 2025-2026 TensorChord Inc.
 
-use crate::io::{MappingsWriter, RecordsWriter};
+use crate::io::{MappingsWriter, RecordsWriter, handle_io_error};
 use crate::segment::{Mapping, Record};
 use crate::tape::TapeReader;
 use crate::tuples::*;
 use crate::vector::Document;
 use crate::{Opaque, WIDTH, compression};
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
+use std::fs::File;
+use std::io::BufWriter;
+use zerocopy::{FromBytes, IntoBytes};
 
 pub fn maintain<R: RelationRead + RelationWrite>(index: &R, _check: impl Fn())
 where
@@ -35,7 +38,10 @@ where
 
     let _lock_guard = index.write(ptr_lock);
 
-    let mut collector_0 = Collector0::new();
+    let tempdir = handle_io_error(tempfile::tempdir());
+
+    let mut relabel = BufWriter::with_capacity(16 * 1024, handle_io_error(tempfile::tempfile()));
+    let mut records_writer = crate::io::records_writer(tempdir.path(), 0);
 
     let jump_guard = index.read(ptr_jump);
     let jump_bytes = jump_guard.get(1).expect("data corruption");
@@ -50,15 +56,44 @@ where
             for i in 1..=guard.len() {
                 let bytes = guard.get(i).expect("data corruption");
                 let tuple = DocumentTuple::deserialize_ref(bytes);
-                collector_0.add_document((!bool::from(tuple.deleted())).then_some(tuple.payload()));
+                add_document(
+                    &mut relabel,
+                    &mut records_writer,
+                    (!bool::from(tuple.deleted())).then_some(tuple.payload()),
+                );
             }
             current = guard.get_opaque().next;
         }
     }
 
-    let tempdir = tempfile::tempdir().expect("failed to create temporary directory");
-
-    let mut collector_1 = collector_0.finish(crate::io::mappings_writer(tempdir.path(), 0));
+    let relabel = handle_io_error(relabel.into_inner().map_err(|e| e.into_error()));
+    let relabel_memmap = if handle_io_error(relabel.metadata()).len() != 0 {
+        #[allow(unsafe_code)]
+        Some(unsafe { handle_io_error(memmap2::Mmap::map(&relabel)) })
+    } else {
+        None
+    };
+    let relabel_slice: &[u32] = if let Some(memmap) = relabel_memmap.as_ref() {
+        FromBytes::ref_from_bytes(memmap).expect("failed to read memory map")
+    } else {
+        &[]
+    };
+    records_writer.flush();
+    let mut records_memmap = {
+        let file = records_writer.get_ref();
+        if handle_io_error(file.metadata()).len() != 0 {
+            #[allow(unsafe_code)]
+            Some(unsafe { handle_io_error(memmap2::MmapMut::map_mut(file)) })
+        } else {
+            None
+        }
+    };
+    let records_slice: &mut [Record] = if let Some(memmap) = records_memmap.as_mut() {
+        FromBytes::mut_from_bytes(memmap.as_mut()).expect("failed to read memory map")
+    } else {
+        &mut []
+    };
+    let mut mappings_writer = crate::io::mappings_writer(tempdir.path(), 0);
 
     {
         let mut tape_tokens = TapeReader::new(jump_tuple.ptr_tokens(), |bytes| {
@@ -104,7 +139,14 @@ where
                 for i in 0..summary.number_of_documents {
                     let document_id = document_ids.as_slice()[i as usize];
                     let term_frequency = term_frequencies.as_slice()[i as usize];
-                    collector_1.add_element(token.id, document_id, term_frequency);
+                    add_element(
+                        relabel_slice,
+                        records_slice,
+                        &mut mappings_writer,
+                        token.id,
+                        document_id,
+                        term_frequency,
+                    );
                 }
             }
         }
@@ -112,8 +154,9 @@ where
         assert!(tape_blocks.next(index).is_none(), "data corruption");
     }
 
-    let (mut records_writer, mut mappings_writer) =
-        collector_1.finish(crate::io::records_writer(tempdir.path(), 0));
+    drop(records_memmap);
+    drop(relabel_memmap);
+    drop(relabel);
 
     let ptr_vectors = {
         let first = jump_tuple.ptr_vectors();
@@ -278,57 +321,36 @@ struct Block {
     compressed_term_frequencies: Vec<u8>,
 }
 
-struct Collector0 {
-    records: Vec<Record>,
-    relabel: Vec<u32>,
+fn add_document(
+    relabel: &mut BufWriter<File>,
+    records_writer: &mut RecordsWriter,
+    payload: Option<[u16; 3]>,
+) {
+    use std::io::Write;
+    let label = if let Some(payload) = payload {
+        records_writer.write(Record(0_u32, payload))
+    } else {
+        u32::MAX
+    };
+    handle_io_error(relabel.write_all(label.as_bytes()));
 }
 
-impl Collector0 {
-    fn new() -> Self {
-        Self {
-            records: Vec::new(),
-            relabel: Vec::new(),
-        }
+fn add_element(
+    relabel_slice: &[u32],
+    records_slice: &mut [Record],
+    mappings_writer: &mut MappingsWriter,
+    token_id: [u8; WIDTH],
+    document_id: u32,
+    term_frequency: u32,
+) {
+    let document_id = {
+        let label = relabel_slice[document_id as usize];
+        if label != u32::MAX { label } else { return }
+    };
+    {
+        let Record(mut length, payload) = records_slice[document_id as usize];
+        length = length.saturating_add(1);
+        records_slice[document_id as usize] = Record(length, payload);
     }
-    fn add_document(&mut self, payload: Option<[u16; 3]>) {
-        if let Some(payload) = payload {
-            let id = self.records.len() as u32;
-            self.records.push(Record(0_u32, payload));
-            self.relabel.push(id);
-        } else {
-            self.relabel.push(u32::MAX);
-        }
-    }
-    fn finish(self, mappings_writer: MappingsWriter) -> Collector1 {
-        Collector1 {
-            records: self.records,
-            relabel: self.relabel,
-            mappings_writer,
-        }
-    }
-}
-
-struct Collector1 {
-    records: Vec<Record>,
-    relabel: Vec<u32>,
-    mappings_writer: MappingsWriter,
-}
-
-impl Collector1 {
-    fn add_element(&mut self, token_id: [u8; WIDTH], document_id: u32, term_frequency: u32) {
-        let document_id = self.relabel[document_id as usize];
-        if document_id == u32::MAX {
-            return;
-        }
-        self.records[document_id as usize].0 =
-            1u32.saturating_add(self.records[document_id as usize].0);
-        self.mappings_writer
-            .write(Mapping(token_id, document_id, term_frequency));
-    }
-    fn finish(self, mut records_writer: RecordsWriter) -> (RecordsWriter, MappingsWriter) {
-        for record in self.records {
-            records_writer.write(record);
-        }
-        (records_writer, self.mappings_writer)
-    }
+    mappings_writer.write(Mapping(token_id, document_id, term_frequency));
 }
