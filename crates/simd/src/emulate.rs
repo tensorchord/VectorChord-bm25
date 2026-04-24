@@ -15,21 +15,6 @@
 #[cfg(target_arch = "aarch64")]
 #[inline]
 #[target_feature(enable = "neon")]
-pub fn vshlq_n_u16<const N: usize>(
-    a: core::arch::aarch64::uint16x8_t,
-) -> core::arch::aarch64::uint16x8_t {
-    seq_macro::seq!(I in 1..16 {
-        match N {
-            0 => a,
-            #(I => core::arch::aarch64::vshlq_n_u16::<I>(a),)*
-            _ => unreachable!(),
-        }
-    })
-}
-
-#[cfg(target_arch = "aarch64")]
-#[inline]
-#[target_feature(enable = "neon")]
 pub fn vshlq_n_u32<const N: usize>(
     a: core::arch::aarch64::uint32x4_t,
 ) -> core::arch::aarch64::uint32x4_t {
@@ -37,21 +22,6 @@ pub fn vshlq_n_u32<const N: usize>(
         match N {
             0 => a,
             #(I => core::arch::aarch64::vshlq_n_u32::<I>(a),)*
-            _ => unreachable!(),
-        }
-    })
-}
-
-#[cfg(target_arch = "aarch64")]
-#[inline]
-#[target_feature(enable = "neon")]
-pub fn vshrq_n_u16<const N: usize>(
-    a: core::arch::aarch64::uint16x8_t,
-) -> core::arch::aarch64::uint16x8_t {
-    seq_macro::seq!(I in 1..16 {
-        match N {
-            0 => a,
-            #(I => core::arch::aarch64::vshrq_n_u16::<I>(a),)*
             _ => unreachable!(),
         }
     })

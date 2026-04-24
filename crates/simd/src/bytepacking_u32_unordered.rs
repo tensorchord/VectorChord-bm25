@@ -13,7 +13,9 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 mod bytewidth {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn bytewidth(input: &[u32]) -> u8 {
         let mut reduce_or = 0_u32;
         for x in input.iter().copied() {
@@ -33,7 +35,9 @@ pub fn bytewidth(input: &[u32]) -> u8 {
 }
 
 mod compress_1 {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn compress(input: &[u32], output: &mut [u8]) {
         assert!(input.len() <= 128);
         let (output, remainder) = output.as_chunks_mut::<1>();
@@ -55,7 +59,9 @@ mod compress_1 {
 }
 
 mod decompress_1 {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn decompress(input: &[u8], output: &mut [u32]) {
         assert!(output.len() <= 128);
         let (input, remainder) = input.as_chunks::<1>();
@@ -78,7 +84,9 @@ mod decompress_1 {
 }
 
 mod compress_2 {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn compress(input: &[u32], output: &mut [u8]) {
         assert!(input.len() <= 128);
         let (output, remainder) = output.as_chunks_mut::<2>();
@@ -100,7 +108,9 @@ mod compress_2 {
 }
 
 mod decompress_2 {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn decompress(input: &[u8], output: &mut [u32]) {
         assert!(output.len() <= 128);
         let (input, remainder) = input.as_chunks::<2>();
@@ -123,7 +133,9 @@ mod decompress_2 {
 }
 
 mod compress_3 {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn compress(input: &[u32], output: &mut [u8]) {
         assert!(input.len() <= 128);
         let (output, remainder) = output.as_chunks_mut::<3>();
@@ -145,7 +157,9 @@ mod compress_3 {
 }
 
 mod decompress_3 {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn decompress(input: &[u8], output: &mut [u32]) {
         assert!(output.len() <= 128);
         let (input, remainder) = input.as_chunks::<3>();
