@@ -48,18 +48,21 @@ impl RecordsWriter {
             len: 0,
         }
     }
-    pub fn write(&mut self, element: Record) {
+    #[must_use]
+    pub fn write(&mut self, element: Record) -> u32 {
+        let document_id = u32::try_from(self.len).expect("too many documents");
+        if document_id == u32::MAX {
+            panic!("too many documents");
+        }
+        self.len += 1;
         handle_io_error(self.file.write_all(element.as_bytes()));
-        self.len = self.len.checked_add(1).expect("too many documents");
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-    pub fn len(&self) -> usize {
-        self.len
+        document_id
     }
     pub fn flush(&mut self) {
         handle_io_error(self.file.flush());
+    }
+    pub fn get_ref(&mut self) -> &File {
+        self.file.get_ref()
     }
 }
 
@@ -187,11 +190,7 @@ pub fn write(
     document: &Document,
     payload: [u16; 3],
 ) {
-    let document_id = u32::try_from(records_writer.len()).expect("too many documents");
-    if document_id == u32::MAX {
-        panic!("too many documents");
-    }
-    records_writer.write(Record(document.length(), payload));
+    let document_id = records_writer.write(Record(document.length(), payload));
     for &Element { key, value } in document.iter() {
         mappings_writer.write(Mapping(key, document_id, value));
     }
@@ -225,8 +224,7 @@ pub fn locally_merge(dir: impl AsRef<Path>, code: u32) {
         for mapping in reader {
             handle_io_error(writer.write_all(mapping.as_bytes()));
         }
-        handle_io_error(writer.flush());
-        let _ = writer.into_inner();
+        handle_io_error(writer.into_inner().map_err(|e| e.into_error()));
         for number in start..pivot {
             let filename = format!("mappings.{code:08x}.{number:08x}");
             handle_io_error(std::fs::remove_file(dir.join(filename)));
