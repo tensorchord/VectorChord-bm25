@@ -19,14 +19,16 @@ mod build;
 mod bulkdelete;
 mod compression;
 mod evaluate;
+mod flush;
 mod insert;
 mod maintain;
 mod search;
-mod segment;
 mod tape;
 mod tuples;
 
+pub mod io;
 pub mod seed;
+pub mod segment;
 pub mod types;
 pub mod vector;
 
@@ -61,4 +63,3 @@ pub use evaluate::evaluate;
 pub use insert::insert;
 pub use maintain::maintain;
 pub use search::search;
-pub use segment::{Collector, Segment};

@@ -16,9 +16,16 @@ use bm25::types::Bm25IndexOptions;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct Bm25BuildOptions {}
+
+#[allow(clippy::derivable_impls)]
+impl Default for Bm25BuildOptions {
+    fn default() -> Self {
+        Self {}
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]

@@ -30,6 +30,7 @@ simd = { path = "./crates/simd" }
 pgrx = "=0.17.0"
 pgrx-catalog = "0.3.2"
 serde.workspace = true
+tempfile.workspace = true
 toml = "1.1.2"
 validator.workspace = true
 
@@ -50,6 +51,7 @@ edition = "2024"
 [workspace.dependencies]
 rand = "0.10.1"
 serde = { version = "1.0.228", features = ["derive"] }
+tempfile = "3.27.0"
 validator = { version = "0.20.0", features = ["derive"] }
 zerocopy = { version = "0.8.48", features = ["derive", "simd"] }
 

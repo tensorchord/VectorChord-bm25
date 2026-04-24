@@ -13,6 +13,7 @@ simd = { path = "../simd" }
 blake3 = "1.8.4"
 getrandom = "0.4.2"
 serde.workspace = true
+tempfile.workspace = true
 validator.workspace = true
 zerocopy.workspace = true
 
