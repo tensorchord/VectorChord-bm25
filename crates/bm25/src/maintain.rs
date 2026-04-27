@@ -19,12 +19,17 @@ use crate::tuples::*;
 use crate::vector::Document;
 use crate::{Opaque, WIDTH, compression};
 use index::relation::{Page, PageGuard, RelationRead, RelationWrite};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::BufWriter;
+use std::path::Path;
 use zerocopy::{FromBytes, IntoBytes};
 
-pub fn maintain<R: RelationRead + RelationWrite>(index: &R, _check: impl Fn())
-where
+pub fn maintain<R: RelationRead + RelationWrite>(
+    index: &R,
+    _check: impl Fn(),
+    dir: &Path,
+    file: &Path,
+) where
     R::Page: Page<Opaque = Opaque>,
 {
     let meta_guard = index.read(0);
@@ -38,10 +43,11 @@ where
 
     let _lock_guard = index.write(ptr_lock);
 
-    let tempdir = handle_io_error(tempfile::tempdir());
-
-    let mut relabel = BufWriter::with_capacity(16 * 1024, handle_io_error(tempfile::tempfile()));
-    let mut records_writer = crate::io::records_writer(tempdir.path(), 0);
+    let mut relabel = BufWriter::with_capacity(
+        16 * 1024,
+        handle_io_error(OpenOptions::new().read(true).write(true).open(file)),
+    );
+    let mut records_writer = crate::io::records_writer(dir, 0);
 
     let jump_guard = index.read(ptr_jump);
     let jump_bytes = jump_guard.get(1).expect("data corruption");
@@ -93,7 +99,7 @@ where
     } else {
         &mut []
     };
-    let mut mappings_writer = crate::io::mappings_writer(tempdir.path(), 0);
+    let mut mappings_writer = crate::io::mappings_writer(dir, 0);
 
     {
         let mut tape_tokens = TapeReader::new(jump_tuple.ptr_tokens(), |bytes| {
@@ -254,9 +260,9 @@ where
     mappings_writer.flush();
     drop(records_writer);
     drop(mappings_writer);
-    crate::io::locally_merge(tempdir.path(), 0);
+    crate::io::locally_merge(dir, 0);
 
-    let segment = crate::io::readers(tempdir.path(), 1);
+    let segment = crate::io::readers(dir, 1);
     let flushed = crate::flush::flush(k1, b, index, segment);
 
     let mut jump_guard = index.write(ptr_jump);

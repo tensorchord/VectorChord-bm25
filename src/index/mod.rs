@@ -19,6 +19,7 @@ mod hook;
 mod operators;
 mod scanners;
 mod storage;
+mod temp;
 mod traverse;
 
 pub fn init() {

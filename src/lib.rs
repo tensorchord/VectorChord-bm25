@@ -70,6 +70,20 @@ fn is_main() -> bool {
     IS_MAIN.get()
 }
 
+#[must_use]
+fn tempname() -> String {
+    let pid = std::process::id();
+    let number = {
+        static mut COUNTER: u32 = 0;
+        unsafe {
+            let number = COUNTER;
+            COUNTER = COUNTER.wrapping_add(1);
+            number
+        }
+    };
+    format!("pgsql_tmp{pid}.{number}.vchord_bm25")
+}
+
 #[cfg(not(panic = "unwind"))]
 compile_error!("This crate must be compiled with `-Cpanic=unwind`.");
 

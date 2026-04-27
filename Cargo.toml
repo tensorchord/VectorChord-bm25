@@ -27,10 +27,11 @@ bm25 = { path = "./crates/bm25" }
 index = { path = "./crates/index" }
 simd = { path = "./crates/simd" }
 
+getrandom.workspace = true
 pgrx = "=0.17.0"
 pgrx-catalog = "0.3.2"
+rand.workspace = true
 serde.workspace = true
-tempfile.workspace = true
 toml = "1.1.2"
 validator.workspace = true
 
@@ -49,9 +50,9 @@ version = "0.0.0"
 edition = "2024"
 
 [workspace.dependencies]
+getrandom = "0.4.2"
 rand = "0.10.1"
 serde = { version = "1.0.228", features = ["derive"] }
-tempfile = "3.27.0"
 validator = { version = "0.20.0", features = ["derive"] }
 zerocopy = { version = "0.8.48", features = ["derive", "simd"] }
 
