@@ -1,0 +1,85 @@
+statement ok
+SET enable_seqscan TO off;
+
+statement ok
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    passage TEXT
+);
+
+statement ok
+INSERT INTO documents (passage) VALUES 
+('PostgreSQL is a powerful, open-source object-relational database system. It has over 15 years of active development.'),
+('Full-text search is a technique for searching in plain-text documents or textual database fields. PostgreSQL supports this with tsvector.'),
+('BM25 is a ranking function used by search engines to estimate the relevance of documents to a given search query.'),
+('PostgreSQL provides many advanced features like full-text search, window functions, and more.'),
+('Search and ranking in databases are important in building effective information retrieval systems.'),
+('The BM25 ranking algorithm is derived from the probabilistic retrieval framework.'),
+('Full-text search indexes documents to allow fast text queries. PostgreSQL supports this through its GIN and GiST indexes.'),
+('The PostgreSQL community is active and regularly improves the database system.'),
+('PostgreSQL supports both non-relational and relational data types.'),
+('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
+
+statement ok
+CREATE INDEX documents_passage_bm25 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops);
+
+statement ok
+CREATE INDEX documents_passage_bm25_0 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops) WHERE id % 2 = 0;
+
+statement ok
+CREATE INDEX documents_passage_bm25_1 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops) WHERE id % 2 = 1;
+
+statement ok
+SET "bm25.limit" = 10;
+
+query I
+SELECT id
+FROM documents
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
+LIMIT 10;
+----
+8
+9
+4
+1
+7
+2
+
+statement error expected index
+SELECT id
+FROM documents
+WHERE id % 2 = 0
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
+LIMIT 10;
+
+query I
+SELECT id
+FROM documents
+WHERE id % 2 = 0
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25_0')
+LIMIT 10;
+----
+8
+4
+2
+
+statement error expected index
+SELECT id
+FROM documents
+WHERE id % 2 = 1
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
+LIMIT 10;
+
+query I
+SELECT id
+FROM documents
+WHERE id % 2 = 1
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25_1')
+LIMIT 10;
+----
+9
+1
+7
+
+statement ok
+DROP TABLE documents;

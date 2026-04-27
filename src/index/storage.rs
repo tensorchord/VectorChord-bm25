@@ -13,8 +13,8 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use index::relation::{
-    Opaque, Page, PageGuard, Relation, RelationPrefetch, RelationRead, RelationReadTypes,
-    RelationWrite, RelationWriteTypes,
+    Opaque, Page, PageGuard, Relation, RelationId, RelationPrefetch, RelationRead,
+    RelationReadTypes, RelationWrite, RelationWriteTypes,
 };
 use std::marker::PhantomData;
 use std::mem::{MaybeUninit, offset_of};
@@ -254,6 +254,16 @@ impl<Opaque> PostgresRelation<Opaque> {
 
 impl<O: Opaque> Relation for PostgresRelation<O> {
     type Page = PostgresPage<O>;
+}
+
+impl<O: Opaque> RelationId for PostgresRelation<O> {
+    fn id(&self) -> u32 {
+        unsafe {
+            let oid = (*self.raw).rd_id;
+            debug_assert!(oid != pgrx::pg_sys::Oid::INVALID);
+            oid.to_u32()
+        }
+    }
 }
 
 impl<O: Opaque> RelationReadTypes for PostgresRelation<O> {

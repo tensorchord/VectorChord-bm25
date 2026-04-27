@@ -58,6 +58,10 @@ pub trait Relation {
     type Page: Page;
 }
 
+pub trait RelationId {
+    fn id(&self) -> u32;
+}
+
 pub trait RelationReadTypes: Relation {
     type ReadGuard<'b>: PageGuard + Deref<Target = Self::Page>;
 }

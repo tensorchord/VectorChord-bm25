@@ -13,7 +13,7 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use crate::index::fetcher::Fetcher;
-use index::relation::{Page, RelationRead};
+use index::relation::{Page, RelationId, RelationRead};
 use pgrx::pg_sys::Datum;
 
 pub trait SearchBuilder: 'static {
@@ -25,7 +25,7 @@ pub trait SearchBuilder: 'static {
 
     fn new<R>(relation: R, opfamily: Self::Opfamily) -> Self
     where
-        R: RelationRead,
+        R: RelationId + RelationRead,
         R::Page: Page<Opaque = Self::Opaque>;
 
     unsafe fn add(&mut self, strategy: u16, datum: Option<Datum>);
