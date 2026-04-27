@@ -11,10 +11,9 @@ score = { path = "../score" }
 simd = { path = "../simd" }
 
 blake3 = "1.8.4"
-getrandom = "0.4.2"
+getrandom.workspace = true
 memmap2 = "0.9.10"
 serde.workspace = true
-tempfile.workspace = true
 validator.workspace = true
 zerocopy.workspace = true
 

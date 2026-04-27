@@ -18,6 +18,7 @@ use crate::index::bm25::am::Reloption;
 use crate::index::bm25::types::*;
 use crate::index::fetcher::ctid_to_key;
 use crate::index::storage::PostgresRelation;
+use crate::index::temp::tempdir;
 use crate::index::traverse::{HeapTraverser, Traverser};
 use std::ffi::{CStr, OsStr};
 use std::marker::PhantomData;
@@ -140,7 +141,7 @@ pub unsafe extern "C-unwind" fn ambuild(
     reporter.tuples_total(unsafe { (*(*index_relation).rd_rel).reltuples as u64 });
     reporter.phase(BuildPhase::from_code(BuildPhaseCode::Scanning));
     let seed = bm25::seed::random();
-    let tempdir = tempfile::tempdir().expect("failed to create temporary directory");
+    let tempdir = tempdir();
     let total = if let Some(leader) = unsafe {
         Bm25Leader::enter(
             c"bm25_parallel_build_main",
@@ -534,6 +535,7 @@ pub unsafe extern "C-unwind" fn bm25_parallel_build_main(
     _seg: *mut pgrx::pg_sys::dsm_segment,
     toc: *mut pgrx::pg_sys::shm_toc,
 ) {
+    let _ = rand::rng().reseed();
     let bm25shared = unsafe {
         pgrx::pg_sys::shm_toc_lookup(toc, 0xA000000000000001, false).cast::<Bm25Shared>()
     };

@@ -162,7 +162,6 @@ dependencies = [
  "score",
  "serde",
  "simd",
- "tempfile",
  "validator",
  "zerocopy",
 ]
@@ -1546,13 +1545,14 @@ version = "0.0.0"
 dependencies = [
  "always_equal",
  "bm25",
+ "getrandom",
  "index",
  "mimalloc",
  "pgrx",
  "pgrx-catalog",
+ "rand",
  "serde",
  "simd",
- "tempfile",
  "toml 1.1.2+spec-1.1.0",
  "validator",
 ]

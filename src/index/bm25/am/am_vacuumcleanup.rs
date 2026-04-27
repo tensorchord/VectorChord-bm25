@@ -13,6 +13,7 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 use crate::index::storage::PostgresRelation;
+use crate::index::temp::{tempdir, tempfile};
 
 #[pgrx::pg_guard]
 pub unsafe extern "C-unwind" fn amvacuumcleanup(
@@ -33,6 +34,8 @@ pub unsafe extern "C-unwind" fn amvacuumcleanup(
         #[cfg(feature = "pg18")]
         pgrx::pg_sys::vacuum_delay_point(false);
     };
-    bm25::maintain(&index, check);
+    let tempdir = tempdir();
+    let tempfile = tempfile();
+    bm25::maintain(&index, check, tempdir.path(), tempfile.path());
     stats
 }
