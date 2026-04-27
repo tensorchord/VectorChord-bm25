@@ -35,6 +35,7 @@ pub struct Reloption {
     vl_len_: i32,
     options: i32,
     limit: i32,
+    prefilter: bool,
 }
 
 impl Reloption {
@@ -59,6 +60,14 @@ impl Reloption {
             (*this).limit
         }
     }
+    pub unsafe fn prefilter(this: *const Self, default: bool) -> bool {
+        unsafe {
+            if this.is_null() {
+                return default;
+            }
+            (*this).prefilter
+        }
+    }
 }
 
 const TABLE: &[pgrx::pg_sys::relopt_parse_elt] = &[
@@ -73,6 +82,13 @@ const TABLE: &[pgrx::pg_sys::relopt_parse_elt] = &[
         optname: c"limit".as_ptr(),
         opttype: pgrx::pg_sys::relopt_type::RELOPT_TYPE_INT,
         offset: std::mem::offset_of!(Reloption, limit) as i32,
+        #[cfg(feature = "pg18")]
+        isset_offset: 0,
+    },
+    pgrx::pg_sys::relopt_parse_elt {
+        optname: c"prefilter".as_ptr(),
+        opttype: pgrx::pg_sys::relopt_type::RELOPT_TYPE_BOOL,
+        offset: std::mem::offset_of!(Reloption, prefilter) as i32,
         #[cfg(feature = "pg18")]
         isset_offset: 0,
     },
@@ -100,6 +116,13 @@ pub fn init() {
                 0,
                 0,
                 65535,
+                pgrx::pg_sys::AccessExclusiveLock as pgrx::pg_sys::LOCKMODE,
+            );
+            pgrx::pg_sys::add_bool_reloption(
+                kind as _,
+                c"prefilter".as_ptr(),
+                c"Search parameter `bm25.prefilter`".as_ptr(),
+                false,
                 pgrx::pg_sys::AccessExclusiveLock as pgrx::pg_sys::LOCKMODE,
             );
         }
@@ -343,7 +366,7 @@ pub unsafe extern "C-unwind" fn amrescan(
         let index = PostgresRelation::new((*scan).indexRelation);
         let options = SearchOptions {
             limit: gucs::bm25_limit((*scan).indexRelation),
-            prefilter: gucs::bm25_prefilter(),
+            prefilter: gucs::bm25_prefilter((*scan).indexRelation),
         };
         let fetcher = {
             let hack = scanner.hack;

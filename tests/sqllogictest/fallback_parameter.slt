@@ -71,4 +71,16 @@ LIMIT 10;
 8
 
 statement ok
+ALTER INDEX documents_passage_bm25 SET (prefilter = on);
+
+query T
+SELECT id
+FROM documents
+WHERE id <> 8
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
+LIMIT 10;
+----
+9
+
+statement ok
 DROP TABLE documents;
