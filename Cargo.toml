@@ -54,7 +54,10 @@ getrandom = "0.4.2"
 rand = "0.10.1"
 serde = { version = "1.0.228", features = ["derive"] }
 validator = { version = "0.20.0", features = ["derive"] }
-zerocopy = { version = "0.8.48", features = ["derive", "simd"] }
+zerocopy = { version = "=0.8.48", features = ["derive", "simd"] }
+
+[patch.crates-io]
+zerocopy = { git = "https://github.com/usamoi/zerocopy.git", branch = "v0.8.48-simd" }
 
 [workspace.lints]
 # complexity

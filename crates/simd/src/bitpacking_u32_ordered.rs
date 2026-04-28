@@ -13,7 +13,9 @@
 // Copyright (c) 2025-2026 TensorChord Inc.
 
 mod bitwidth {
-    #[crate::multiversion("v4", "v3", "v2", "a2")]
+    #[crate::multiversion(
+        "v4", "v3", "v2", "a2", "z17", "z16", "z15", "z14", "z13", "p9", "p8", "p7"
+    )]
     pub fn bitwidth(min: u32, input: &[u32; 128]) -> u8 {
         let mut last = min;
         let mut reduce_or = 0_u32;
@@ -79,7 +81,80 @@ seq_macro::seq!(BITWIDTH in 1..=31 {
             crate::bitpacking::compress!(BITWIDTH, 32, state, input, output)
         }
 
-        #[crate::multiversion(@"v2", @"a2")]
+        #[inline]
+        #[cfg(target_arch = "s390x")]
+        #[crate::target_cpu(enable = "z13")]
+        fn compress_z13(min: u32, input: &[u32; 128], output: &mut [u8]) {
+            type S = core::arch::s390x::vector_unsigned_int;
+            type T = core::arch::s390x::vector_unsigned_int;
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn delta(state: &mut S, value: T) -> T {
+                unsafe {
+                    use core::arch::s390x::*;
+                    let result = vec_sub(value, vec_sld::<_, 12>(*state, value));
+                    *state = value;
+                    result
+                }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn bitor(lhs: T, rhs: T) -> T {
+                unsafe { core::arch::s390x::vec_or(lhs, rhs) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn shl<const N: u32>(x: T) -> T {
+                unsafe { core::arch::s390x::vec_sl(x, core::arch::s390x::vec_splats(N)) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn shr<const N: u32>(x: T) -> T {
+                unsafe { core::arch::s390x::vec_sr(x, core::arch::s390x::vec_splats(N)) }
+            }
+            let state = unsafe { core::arch::s390x::vec_splats(min) };
+            crate::bitpacking::compress!(BITWIDTH, 32, state, input, output)
+        }
+
+        #[inline]
+        #[cfg(target_arch = "powerpc64")]
+        #[crate::target_cpu(enable = "p7")]
+        fn compress_p7(min: u32, input: &[u32; 128], output: &mut [u8]) {
+            type S = core::arch::powerpc64::vector_unsigned_int;
+            type T = core::arch::powerpc64::vector_unsigned_int;
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn delta(state: &mut S, value: T) -> T {
+                unsafe {
+                    use core::arch::powerpc64::*;
+                    #[cfg(target_endian = "big")]
+                    let result = vec_sub(value, vec_sld::<_, 12>(*state, value));
+                    #[cfg(target_endian = "little")]
+                    let result = vec_sub(value, vec_sld::<_, 4>(value, *state));
+                    *state = value;
+                    result
+                }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn bitor(lhs: T, rhs: T) -> T {
+                unsafe { core::arch::powerpc64::vec_or(lhs, rhs) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn shl<const N: u32>(x: T) -> T {
+                unsafe { core::arch::powerpc64::vec_sl(x, core::arch::powerpc64::vec_splats(N)) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn shr<const N: u32>(x: T) -> T {
+                unsafe { core::arch::powerpc64::vec_sr(x, core::arch::powerpc64::vec_splats(N)) }
+            }
+            let state = unsafe { core::arch::powerpc64::vec_splats(min) };
+            crate::bitpacking::compress!(BITWIDTH, 32, state, input, output)
+        }
+
+        #[crate::multiversion(@"v2", @"a2", @"z13", @"p7")]
         pub fn compress(min: u32, input: &[u32; 128], output: &mut [u8]) {
             type S = u32;
             type T = [u32; 4];
@@ -187,7 +262,109 @@ seq_macro::seq!(BITWIDTH in 1..=31 {
             crate::bitpacking::decompress!(BITWIDTH, 32, mask, state, input, output)
         }
 
-        #[crate::multiversion(@"v2", @"a2")]
+        #[inline]
+        #[cfg(target_arch = "s390x")]
+        #[crate::target_cpu(enable = "z13")]
+        fn decompress_z13(min: u32, input: &[u8], output: &mut [u32; 128]) {
+            type S = core::arch::s390x::vector_unsigned_int;
+            type T = core::arch::s390x::vector_unsigned_int;
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn delta(state: &mut S, value: T) -> T {
+                unsafe {
+                    use core::arch::s390x::*;
+                    let zero = vec_splat_u32::<0>();
+                    let base = vec_splat::<_, 3>(*state);
+                    let x0 = value;
+                    let x1 = vec_sld::<_, 8>(zero, x0);
+                    let x2 = vec_add(x0, x1);
+                    let x3 = vec_sld::<_, 12>(zero, x2);
+                    let x4 = vec_add(x2, x3);
+                    let result = vec_add(base, x4);
+                    *state = result;
+                    result
+                }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn bitor(lhs: T, rhs: T) -> T {
+                unsafe { core::arch::s390x::vec_or(lhs, rhs) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn bitand(lhs: T, rhs: T) -> T {
+                unsafe { core::arch::s390x::vec_and(lhs, rhs) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn shl<const N: u32>(x: T) -> T {
+                unsafe { core::arch::s390x::vec_sl(x, core::arch::s390x::vec_splats(N)) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "z13")]
+            fn shr<const N: u32>(x: T) -> T {
+                unsafe { core::arch::s390x::vec_sr(x, core::arch::s390x::vec_splats(N)) }
+            }
+            let mask = unsafe { core::arch::s390x::vec_splats((1u32 << BITWIDTH) - 1) };
+            let state = unsafe { core::arch::s390x::vec_splats(min) };
+            crate::bitpacking::decompress!(BITWIDTH, 32, mask, state, input, output)
+        }
+
+        #[inline]
+        #[cfg(target_arch = "powerpc64")]
+        #[crate::target_cpu(enable = "p7")]
+        fn decompress_p7(min: u32, input: &[u8], output: &mut [u32; 128]) {
+            type S = core::arch::powerpc64::vector_unsigned_int;
+            type T = core::arch::powerpc64::vector_unsigned_int;
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn delta(state: &mut S, value: T) -> T {
+                unsafe {
+                    use core::arch::powerpc64::*;
+                    let zero = vec_splat_u32::<0>();
+                    let base = vec_splat::<_, 3>(*state);
+                    let x0 = value;
+                    #[cfg(target_endian = "big")]
+                    let x1 = vec_sld::<_, 8>(zero, x0);
+                    #[cfg(target_endian = "little")]
+                    let x1 = vec_sld::<_, 8>(x0, zero);
+                    let x2 = vec_add(x0, x1);
+                    #[cfg(target_endian = "big")]
+                    let x3 = vec_sld::<_, 12>(zero, x2);
+                    #[cfg(target_endian = "little")]
+                    let x3 = vec_sld::<_, 4>(x2, zero);
+                    let x4 = vec_add(x2, x3);
+                    let result = vec_add(base, x4);
+                    *state = result;
+                    result
+                }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn bitor(lhs: T, rhs: T) -> T {
+                unsafe { core::arch::powerpc64::vec_or(lhs, rhs) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn bitand(lhs: T, rhs: T) -> T {
+                unsafe { core::arch::powerpc64::vec_and(lhs, rhs) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn shl<const N: u32>(x: T) -> T {
+                unsafe { core::arch::powerpc64::vec_sl(x, core::arch::powerpc64::vec_splats(N)) }
+            }
+            #[inline]
+            #[crate::target_cpu(enable = "p7")]
+            fn shr<const N: u32>(x: T) -> T {
+                unsafe { core::arch::powerpc64::vec_sr(x, core::arch::powerpc64::vec_splats(N)) }
+            }
+            let mask = unsafe { core::arch::powerpc64::vec_splats((1u32 << BITWIDTH) - 1) };
+            let state = unsafe { core::arch::powerpc64::vec_splats(min) };
+            crate::bitpacking::decompress!(BITWIDTH, 32, mask, state, input, output)
+        }
+
+        #[crate::multiversion(@"v2", @"a2", @"z13", @"p7")]
         pub fn decompress(min: u32, input: &[u8], output: &mut [u32; 128]) {
             type S = u32;
             type T = [u32; 4];
