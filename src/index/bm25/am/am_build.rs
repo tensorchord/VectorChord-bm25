@@ -154,15 +154,32 @@ pub unsafe extern "C-unwind" fn ambuild(
     } {
         unsafe {
             leader.wait();
-            parallel_build(
+            build(
                 index_relation,
                 heap_relation,
                 index_info,
-                leader.tablescandesc,
-                leader.bm25shared,
-                leader.path,
-                |indtuples| {
+                pgrx::pg_sys::table_beginscan_parallel(heap_relation, leader.tablescandesc),
+                (*leader.bm25shared).seed,
+                parse_path(leader.path),
+                || {
+                    let indtuples;
+                    {
+                        pgrx::pg_sys::SpinLockAcquire(&raw mut (*leader.bm25shared).mutex);
+                        (*leader.bm25shared).indtuples += 1;
+                        indtuples = (*leader.bm25shared).indtuples;
+                        pgrx::pg_sys::SpinLockRelease(&raw mut (*leader.bm25shared).mutex);
+                    }
                     reporter.tuples_done(indtuples);
+                },
+                || {
+                    let indtuples;
+                    {
+                        pgrx::pg_sys::SpinLockAcquire(&raw mut (*leader.bm25shared).mutex);
+                        indtuples = (*leader.bm25shared).indtuples;
+                        pgrx::pg_sys::SpinLockRelease(&raw mut (*leader.bm25shared).mutex);
+                    }
+                    reporter.tuples_done(indtuples);
+                    reporter.tuples_total(indtuples);
                 },
                 || {
                     #[allow(clippy::needless_late_init)]
@@ -200,9 +217,7 @@ pub unsafe extern "C-unwind" fn ambuild(
                     );
                     order
                 },
-                |indtuples| {
-                    reporter.tuples_done(indtuples);
-                    reporter.tuples_total(indtuples);
+                || {
                     // enter the barrier
                     let shared = leader.bm25shared;
                     pgrx::pg_sys::SpinLockAcquire(&raw mut (*shared).mutex);
@@ -269,20 +284,24 @@ pub unsafe extern "C-unwind" fn ambuild(
         }
     } else {
         unsafe {
-            sequential_build(
+            let indtuples = std::cell::Cell::new(0_u64);
+            build(
                 index_relation,
                 heap_relation,
                 index_info,
+                std::ptr::null_mut(),
                 seed,
                 tempdir.path(),
-                |indtuples| {
-                    reporter.tuples_done(indtuples);
+                || {
+                    indtuples.update(|indtuples| indtuples + 1);
+                    reporter.tuples_done(indtuples.get());
                 },
+                || {
+                    reporter.tuples_done(indtuples.get());
+                    reporter.tuples_total(indtuples.get());
+                },
+                || 0,
                 || (),
-                |indtuples| {
-                    reporter.tuples_done(indtuples);
-                    reporter.tuples_total(indtuples);
-                },
                 || (),
             );
             1
@@ -529,6 +548,14 @@ impl Drop for Bm25Leader {
     }
 }
 
+unsafe fn parse_path<'a>(path: *mut u8) -> &'a Path {
+    unsafe {
+        let len = (path as *const u64).read_unaligned();
+        let bytes = std::slice::from_raw_parts(path.add(8), len as usize);
+        OsStr::from_encoded_bytes_unchecked(bytes).as_ref()
+    }
+}
+
 #[pgrx::pg_guard]
 #[unsafe(no_mangle)]
 pub unsafe extern "C-unwind" fn bm25_parallel_build_main(
@@ -543,11 +570,7 @@ pub unsafe extern "C-unwind" fn bm25_parallel_build_main(
         pgrx::pg_sys::shm_toc_lookup(toc, 0xA000000000000002, false)
             .cast::<pgrx::pg_sys::ParallelTableScanDescData>()
     };
-    let path = unsafe {
-        pgrx::pg_sys::shm_toc_lookup(toc, 0xA000000000000003, false)
-            .cast::<u8>()
-            .cast_const()
-    };
+    let path = unsafe { pgrx::pg_sys::shm_toc_lookup(toc, 0xA000000000000003, false).cast::<u8>() };
     let heap_lockmode;
     let index_lockmode;
     if unsafe { !(*bm25shared).isconcurrent } {
@@ -557,22 +580,28 @@ pub unsafe extern "C-unwind" fn bm25_parallel_build_main(
         heap_lockmode = pgrx::pg_sys::ShareUpdateExclusiveLock as pgrx::pg_sys::LOCKMODE;
         index_lockmode = pgrx::pg_sys::RowExclusiveLock as pgrx::pg_sys::LOCKMODE;
     }
-    let heap = unsafe { pgrx::pg_sys::table_open((*bm25shared).heaprelid, heap_lockmode) };
-    let index = unsafe { pgrx::pg_sys::index_open((*bm25shared).indexrelid, index_lockmode) };
-    let index_info = unsafe { pgrx::pg_sys::BuildIndexInfo(index) };
+    let heap_relation = unsafe { pgrx::pg_sys::table_open((*bm25shared).heaprelid, heap_lockmode) };
+    let index_relation =
+        unsafe { pgrx::pg_sys::index_open((*bm25shared).indexrelid, index_lockmode) };
+    let index_info = unsafe { pgrx::pg_sys::BuildIndexInfo(index_relation) };
     unsafe {
         (*index_info).ii_Concurrent = (*bm25shared).isconcurrent;
     }
 
     unsafe {
-        parallel_build(
-            index,
-            heap,
+        build(
+            index_relation,
+            heap_relation,
             index_info,
-            tablescandesc,
-            bm25shared,
-            path,
-            |_| (),
+            pgrx::pg_sys::table_beginscan_parallel(heap_relation, tablescandesc),
+            (*bm25shared).seed,
+            parse_path(path),
+            || {
+                pgrx::pg_sys::SpinLockAcquire(&raw mut (*bm25shared).mutex);
+                (*bm25shared).indtuples += 1;
+                pgrx::pg_sys::SpinLockRelease(&raw mut (*bm25shared).mutex);
+            },
+            || (),
             || {
                 #[allow(clippy::needless_late_init)]
                 let order;
@@ -601,7 +630,7 @@ pub unsafe extern "C-unwind" fn bm25_parallel_build_main(
                 pgrx::pg_sys::ConditionVariableCancelSleep();
                 order
             },
-            |_| {
+            || {
                 // enter the barrier
                 let shared = bm25shared;
                 pgrx::pg_sys::SpinLockAcquire(&raw mut (*shared).mutex);
@@ -653,35 +682,28 @@ pub unsafe extern "C-unwind" fn bm25_parallel_build_main(
     }
 
     unsafe {
-        pgrx::pg_sys::index_close(index, index_lockmode);
-        pgrx::pg_sys::table_close(heap, heap_lockmode);
+        pgrx::pg_sys::index_close(index_relation, index_lockmode);
+        pgrx::pg_sys::table_close(heap_relation, heap_lockmode);
     }
 }
 
-unsafe fn parallel_build(
+unsafe fn build(
     index_relation: pgrx::pg_sys::Relation,
     heap_relation: pgrx::pg_sys::Relation,
     index_info: *mut pgrx::pg_sys::IndexInfo,
-    tablescandesc: *mut pgrx::pg_sys::ParallelTableScanDescData,
-    bm25shared: *mut Bm25Shared,
-    path: *const u8,
-    mut callback: impl FnMut(u64),
+    scan: *mut pgrx::pg_sys::TableScanDescData,
+    seed: [u8; 32],
+    path: &Path,
+    mut report_done: impl FnMut(),
+    mut report_total: impl FnMut(),
     sync_0: impl FnOnce() -> u32,
-    sync_1: impl FnOnce(u64),
+    sync_1: impl FnOnce(),
     sync_2: impl FnOnce(),
 ) {
-    let seed = unsafe { (*bm25shared).seed };
-    let path: &Path = unsafe {
-        let len = (path as *const u64).read_unaligned();
-        let bytes = std::slice::from_raw_parts(path.add(8), len as _);
-        OsStr::from_encoded_bytes_unchecked(bytes).as_ref()
-    };
-
     let order = sync_0();
     let mut records_writer = bm25::io::records_writer(path, order);
     let mut mappings_writer = bm25::io::mappings_writer(path, order);
 
-    let scan = unsafe { pgrx::pg_sys::table_beginscan_parallel(heap_relation, tablescandesc) };
     let traverser = unsafe { HeapTraverser::new(heap_relation, index_relation, index_info, scan) };
 
     traverser.traverse(true, |tuple: &mut dyn crate::index::traverse::Tuple| {
@@ -707,97 +729,18 @@ unsafe fn parallel_build(
                 ctid_to_key(ctid),
             );
         }
-        unsafe {
-            let indtuples;
-            {
-                pgrx::pg_sys::SpinLockAcquire(&raw mut (*bm25shared).mutex);
-                (*bm25shared).indtuples += 1;
-                indtuples = (*bm25shared).indtuples;
-                pgrx::pg_sys::SpinLockRelease(&raw mut (*bm25shared).mutex);
-            }
-            callback(indtuples);
-        }
+        report_done();
     });
 
-    sync_1(unsafe {
-        // It may not be accurate, but it is acceptable.
-        let indtuples;
-        {
-            pgrx::pg_sys::SpinLockAcquire(&raw mut (*bm25shared).mutex);
-            indtuples = (*bm25shared).indtuples;
-            pgrx::pg_sys::SpinLockRelease(&raw mut (*bm25shared).mutex);
-        }
-        indtuples
-    });
+    sync_1();
+
+    report_total();
 
     records_writer.flush();
     mappings_writer.flush();
     drop(records_writer);
     drop(mappings_writer);
     bm25::io::locally_merge(path, order);
-
-    sync_2();
-}
-
-unsafe fn sequential_build(
-    index_relation: pgrx::pg_sys::Relation,
-    heap_relation: pgrx::pg_sys::Relation,
-    index_info: *mut pgrx::pg_sys::IndexInfo,
-    seed: [u8; 32],
-    path: &Path,
-    mut callback: impl FnMut(u64),
-    sync_0: impl FnOnce(),
-    sync_1: impl FnOnce(u64),
-    sync_2: impl FnOnce(),
-) {
-    sync_0();
-    let mut records_writer = bm25::io::records_writer(path, 0);
-    let mut mappings_writer = bm25::io::mappings_writer(path, 0);
-    let traverser = unsafe {
-        HeapTraverser::new(
-            heap_relation,
-            index_relation,
-            index_info,
-            std::ptr::null_mut(),
-        )
-    };
-    let mut indtuples = 0_u64;
-    traverser.traverse(true, |tuple: &mut dyn crate::index::traverse::Tuple| {
-        let ctid = tuple.id();
-        let (values, is_nulls) = tuple.build();
-        let value = unsafe { (!is_nulls.add(0).read()).then_some(values.add(0).read()) };
-        let document = 'block: {
-            use pgrx::datum::FromDatum;
-            let Some(datum) = value else {
-                break 'block None;
-            };
-            if datum.is_null() {
-                break 'block None;
-            }
-            let vector = unsafe { TsVectorInput::from_datum(datum, false).unwrap() };
-            Some(cast_tsvector_to_document(&seed, vector.as_borrowed()))
-        };
-        if let Some(document) = document {
-            bm25::io::write(
-                &mut records_writer,
-                &mut mappings_writer,
-                &document,
-                ctid_to_key(ctid),
-            );
-        }
-        {
-            indtuples += 1;
-            callback(indtuples);
-        }
-    });
-
-    sync_1(indtuples);
-
-    records_writer.flush();
-    mappings_writer.flush();
-    drop(records_writer);
-    drop(mappings_writer);
-    bm25::io::locally_merge(path, 0);
 
     sync_2();
 }
