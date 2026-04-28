@@ -23,6 +23,8 @@ static mut BM25_LIMIT_CONFIG: *mut pgrx::pg_sys::config_generic = core::ptr::nul
 
 static BM25_PREFILTER: GucSetting<bool> = GucSetting::<bool>::new(false);
 
+static mut BM25_PREFILTER_CONFIG: *mut pgrx::pg_sys::config_generic = core::ptr::null_mut();
+
 pub fn init() {
     GucRegistry::define_bool_guc(
         c"bm25.enable_scan",
@@ -57,7 +59,10 @@ pub fn init() {
         pgrx::pg_sys::MarkGUCPrefixReserved(c"bm25".as_ptr());
     }
     assert!(crate::is_main());
-    let targets = vec![(c"bm25.limit", &raw mut BM25_LIMIT_CONFIG)];
+    let targets = vec![
+        (c"bm25.limit", &raw mut BM25_LIMIT_CONFIG),
+        (c"bm25.prefilter", &raw mut BM25_PREFILTER_CONFIG),
+    ];
     #[cfg(any(feature = "pg14", feature = "pg15"))]
     unsafe {
         let len = pgrx::pg_sys::GetNumConfigOptions() as usize;
@@ -125,8 +130,18 @@ pub fn bm25_limit(index: pgrx::pg_sys::Relation) -> u32 {
     }
 }
 
-pub fn bm25_prefilter() -> bool {
-    BM25_PREFILTER.get()
+pub fn bm25_prefilter(index: pgrx::pg_sys::Relation) -> bool {
+    use std::convert::identity as parse;
+    assert!(crate::is_main());
+    const DEFAULT: bool = false;
+    if unsafe { (*BM25_PREFILTER_CONFIG).source } != pgrx::pg_sys::GucSource::PGC_S_DEFAULT {
+        let value = BM25_PREFILTER.get();
+        parse(value)
+    } else {
+        use crate::index::bm25::am::Reloption;
+        let value = unsafe { Reloption::prefilter((*index).rd_options as _, DEFAULT) };
+        parse(value)
+    }
 }
 
 #[allow(dead_code)]

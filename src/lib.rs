@@ -72,6 +72,7 @@ fn is_main() -> bool {
 
 #[must_use]
 fn tempname() -> String {
+    assert!(is_main());
     let pid = std::process::id();
     let number = {
         static mut COUNTER: u32 = 0;

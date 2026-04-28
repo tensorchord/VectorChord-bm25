@@ -19,12 +19,14 @@ use crate::index::fetcher::*;
 use crate::index::scanners::SearchBuilder;
 use always_equal::AlwaysEqual;
 use bm25::vector::Query;
-use index::relation::{Page, RelationRead};
+use index::relation::{Page, RelationId, RelationRead};
 use pgrx::heap_tuple::PgHeapTuple;
+use pgrx::pg_sys::Oid;
 use std::cmp::Reverse;
 use std::num::NonZero;
 
 pub struct DefaultBuilder {
+    oid: Oid,
     seed: [u8; 32],
     orderbys: Vec<Option<Query>>,
 }
@@ -38,11 +40,13 @@ impl SearchBuilder for DefaultBuilder {
 
     fn new<R>(index: R, (): ()) -> Self
     where
-        R: RelationRead,
+        R: RelationId + RelationRead,
         R::Page: Page<Opaque = bm25::Opaque>,
     {
+        let oid = Oid::from_u32(index.id());
         let seed = bm25::seed::seed(&index);
         Self {
+            oid,
             seed,
             orderbys: Vec::new(),
         }
@@ -59,15 +63,25 @@ impl SearchBuilder for DefaultBuilder {
                     if datum.is_null() {
                         break 'block None;
                     }
-                    let tuple = unsafe {
+                    let rhs = unsafe {
                         PgHeapTuple::<'_, pgrx::AllocatedByRust>::from_datum(datum, false).unwrap()
                     };
-                    let vector: TsVectorOutput = match tuple.get_by_index(NonZero::new(1).unwrap())
-                    {
+                    let vector: TsVectorOutput = match rhs.get_by_index(NonZero::new(1).unwrap()) {
                         Ok(Some(s)) => s,
                         Ok(None) => pgrx::error!("bm25query contains a null vector"),
                         Err(_) => unreachable!(),
                     };
+                    let index: Oid = match rhs.get_by_index(NonZero::new(2).unwrap()) {
+                        Ok(Some(s)) => s,
+                        Ok(None) => pgrx::error!("bm25query contains a null index"),
+                        Err(_) => unreachable!(),
+                    };
+                    if index != self.oid {
+                        pgrx::error!(
+                            "expected index {index}, but got index {} for scan",
+                            self.oid
+                        );
+                    }
                     Some(cast_tsvector_to_query(&self.seed, vector.as_borrowed()))
                 };
                 self.orderbys.push(document);

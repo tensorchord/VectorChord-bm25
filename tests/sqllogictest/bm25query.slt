@@ -21,22 +21,18 @@ INSERT INTO documents (passage) VALUES
 ('Effective search ranking algorithms, such as BM25, improve search results by understanding relevance.');
 
 statement ok
-CREATE INDEX documents_passage_bm25 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops)
-WITH (limit = '2');
-
-query T
-SELECT id
-FROM documents
-ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
-LIMIT 10;
-----
-8
-9
+CREATE INDEX documents_passage_bm25 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops);
 
 statement ok
-SET "bm25.limit" TO '3';
+CREATE INDEX documents_passage_bm25_0 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops) WHERE id % 2 = 0;
 
-query T
+statement ok
+CREATE INDEX documents_passage_bm25_1 ON documents USING bm25 ((to_tsvector('english', passage)) bm25_ops) WHERE id % 2 = 1;
+
+statement ok
+SET "bm25.limit" = 10;
+
+query I
 SELECT id
 FROM documents
 ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
@@ -45,42 +41,45 @@ LIMIT 10;
 8
 9
 4
+1
+7
+2
 
-statement ok
-ALTER INDEX documents_passage_bm25 SET (limit = '1');
-
-query T
+statement error expected index
 SELECT id
 FROM documents
+WHERE id % 2 = 0
 ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
+LIMIT 10;
+
+query I
+SELECT id
+FROM documents
+WHERE id % 2 = 0
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25_0')
 LIMIT 10;
 ----
 8
-9
 4
+2
 
-statement ok
-SET "bm25.limit" TO DEFAULT;
-
-query T
+statement error expected index
 SELECT id
 FROM documents
+WHERE id % 2 = 1
 ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
 LIMIT 10;
-----
-8
 
-statement ok
-ALTER INDEX documents_passage_bm25 SET (prefilter = on);
-
-query T
+query I
 SELECT id
 FROM documents
-WHERE id <> 8
-ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25')
+WHERE id % 2 = 1
+ORDER BY to_tsvector('english', passage) <&> to_bm25query(to_tsvector('english', 'PostgreSQL'), 'documents_passage_bm25_1')
 LIMIT 10;
 ----
 9
+1
+7
 
 statement ok
 DROP TABLE documents;
